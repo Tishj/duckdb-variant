@@ -16,12 +16,12 @@ static constexpr auto VARIANT_TYPE_NAME = "VARIANT";
 static LogicalType CreateVariantType() {
 	child_list_t<LogicalType> top_level_children;
 	top_level_children.emplace_back("keys", LogicalType::LIST(LogicalType::VARCHAR));
-	top_level_children.emplace_back("key_ids", LogicalType::LIST(LogicalType::INTEGER));
-	top_level_children.emplace_back("children", LogicalType::LIST(LogicalType::INTEGER));
+	top_level_children.emplace_back("key_ids", LogicalType::LIST(LogicalType::UINTEGER));
+	top_level_children.emplace_back("children", LogicalType::LIST(LogicalType::UINTEGER));
 
 	child_list_t<LogicalType> values_children;
-	values_children.emplace_back("type_id", LogicalTypeId::INTEGER);
-	values_children.emplace_back("byte_offset", LogicalTypeId::INTEGER);
+	values_children.emplace_back("type_id", LogicalTypeId::UINTEGER);
+	values_children.emplace_back("byte_offset", LogicalTypeId::UINTEGER);
 	top_level_children.emplace_back("values", LogicalType::STRUCT(values_children));
 
 	top_level_children.emplace_back("data", LogicalTypeId::BLOB);
