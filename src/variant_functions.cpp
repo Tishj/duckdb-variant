@@ -3,6 +3,7 @@
 #include "yyjson.hpp"
 #include "duckdb/common/serializer/memory_stream.hpp"
 #include "duckdb/common/typedefs.hpp"
+#include "duckdb/common/optional_idx.hpp"
 
 using namespace duckdb_yyjson; // NOLINT
 
@@ -32,6 +33,7 @@ struct VariantConversionState {
 public:
 	explicit VariantConversionState() {
 	}
+
 public:
 	//! Reset for every row
 	void Reset() {
@@ -49,6 +51,7 @@ public:
 		row_keys_count = 0;
 		row_key_ids_count = 0;
 	}
+
 public:
 	idx_t children_count = 0;
 	idx_t key_ids_count = 0;
@@ -107,7 +110,37 @@ struct VariantVector {
 	}
 };
 
-static bool ConvertJSON(yyjson_val *val, Vector &result, VariantConversionState &state);
+static optional_idx ConvertJSON(yyjson_val *val, Vector &result, VariantConversionState &state);
+
+static bool ConvertJSONArray(yyjson_val *arr, Vector &result, VariantConversionState &state) {
+	auto &children = VariantVector::GetChildren(result);
+	auto &children_entry = ListVector::GetEntry(children);
+	auto children_entry_data = FlatVector::GetData<uint32_t>(children_entry);
+
+	yyjson_arr_iter iter;
+	yyjson_arr_iter_init(arr, &iter);
+
+	//! Write the 'value' blob for the ARRAY
+	uint32_t count = iter.max;
+	auto start_child_index = state.children_count + state.row_children_count;
+	state.stream.WriteData(const_data_ptr_cast(&count), sizeof(uint32_t));
+	state.stream.WriteData(const_data_ptr_cast(&start_child_index), sizeof(uint32_t));
+
+	//! Iterate over all the children in the Array
+	while (yyjson_arr_iter_has_next(&iter)) {
+		auto val = yyjson_arr_iter_next(&iter);
+
+		auto child_index = ConvertJSON(val, result, state);
+		if (!child_index.IsValid()) {
+			return false;
+		}
+
+		//! Set the child index
+		auto children_index = state.children_count + state.row_children_count++;
+		children_entry_data[children_index] = child_index.GetIndex();
+	}
+	return true;
+}
 
 static bool ConvertJSONObject(yyjson_val *obj, Vector &result, VariantConversionState &state) {
 	auto &keys = VariantVector::GetKeys(result);
@@ -147,18 +180,19 @@ static bool ConvertJSONObject(yyjson_val *obj, Vector &result, VariantConversion
 		auto key_ids_index = state.key_ids_count + state.row_key_ids_count++;
 		key_ids_entry_data[key_ids_index] = keys_index;
 
-		//! Set the child index
-		auto children_index = state.children_count + state.row_children_count++;
-		children_entry_data[children_index] = keys_index;
-
-		if (!ConvertJSON(val, result, state)) {
+		auto child_index = ConvertJSON(val, result, state);
+		if (!child_index.IsValid()) {
 			return false;
 		}
+
+		//! Set the child index
+		auto children_index = state.children_count + state.row_children_count++;
+		children_entry_data[children_index] = child_index.GetIndex();
 	}
 	return true;
 }
 
-static bool ConvertJSON(yyjson_val *val, Vector &result, VariantConversionState &state) {
+static optional_idx ConvertJSON(yyjson_val *val, Vector &result, VariantConversionState &state) {
 	auto &type_ids = VariantVector::GetValuesTypeId(result);
 	auto &byte_offsets = VariantVector::GetValuesByteOffset(result);
 
@@ -170,7 +204,7 @@ static bool ConvertJSON(yyjson_val *val, Vector &result, VariantConversionState 
 
 	if (unsafe_yyjson_is_null(val)) {
 		type_ids_data[index] = static_cast<uint8_t>(VariantLogicalType::VARIANT_NULL);
-		return true;
+		return index;
 	}
 
 	switch (unsafe_yyjson_get_tag(val)) {
@@ -185,9 +219,15 @@ static bool ConvertJSON(yyjson_val *val, Vector &result, VariantConversionState 
 		break;
 	}
 	case YYJSON_TYPE_ARR | YYJSON_SUBTYPE_NONE: {
+		if (!ConvertJSONArray(val, result, state)) {
+			return optional_idx();
+		}
 		break;
 	}
 	case YYJSON_TYPE_OBJ | YYJSON_SUBTYPE_NONE: {
+		if (!ConvertJSONObject(val, result, state)) {
+			return optional_idx();
+		}
 		break;
 	}
 	case YYJSON_TYPE_BOOL | YYJSON_SUBTYPE_TRUE: {
@@ -219,7 +259,7 @@ static bool ConvertJSON(yyjson_val *val, Vector &result, VariantConversionState 
 	default:
 		throw InternalException("Unknown yyjson tag in ConvertJSON");
 	}
-	return true;
+	return index;
 }
 
 bool VariantFunctions::CastJSONToVARIANT(Vector &source, Vector &result, idx_t count, CastParameters &parameters) {
@@ -270,7 +310,10 @@ bool VariantFunctions::CastJSONToVARIANT(Vector &source, Vector &result, idx_t c
 		auto &values_list_entry = values_data[i];
 		values_list_entry.offset = ListVector::GetListSize(values);
 
-		ConvertJSON(root, result, state);
+		auto value_index = ConvertJSON(root, result, state);
+		if (!value_index.IsValid()) {
+			return false;
+		}
 
 		//! keys
 		keys_list_entry.length = state.row_keys_count;
@@ -291,7 +334,7 @@ bool VariantFunctions::CastJSONToVARIANT(Vector &source, Vector &result, idx_t c
 		//! value
 		auto size = state.stream.GetPosition();
 		auto stream_data = state.stream.GetData();
-		value_data[i] = StringVector::AddString(value, string_t(reinterpret_cast<const char *>(value_data), size));
+		value_data[i] = StringVector::AddString(value, string_t(reinterpret_cast<const char *>(stream_data), size));
 		state.Reset();
 	}
 	return true;
