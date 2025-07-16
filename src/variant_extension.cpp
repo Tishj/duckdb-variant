@@ -20,7 +20,7 @@ static LogicalType CreateVariantType() {
 	top_level_children.emplace_back("children", LogicalType::LIST(LogicalType::UINTEGER));
 
 	child_list_t<LogicalType> values_children;
-	values_children.emplace_back("type_id", LogicalTypeId::UINTEGER);
+	values_children.emplace_back("type_id", LogicalTypeId::UTINYINT);
 	values_children.emplace_back("byte_offset", LogicalTypeId::UINTEGER);
 	top_level_children.emplace_back("values", LogicalType::STRUCT(values_children));
 
