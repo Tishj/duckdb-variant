@@ -22,7 +22,7 @@ static LogicalType CreateVariantType() {
 	child_list_t<LogicalType> values_children;
 	values_children.emplace_back("type_id", LogicalTypeId::UTINYINT);
 	values_children.emplace_back("byte_offset", LogicalTypeId::UINTEGER);
-	top_level_children.emplace_back("values", LogicalType::STRUCT(values_children));
+	top_level_children.emplace_back("values", LogicalType::LIST(LogicalType::STRUCT(values_children)));
 
 	top_level_children.emplace_back("data", LogicalTypeId::BLOB);
 	auto res = LogicalType::STRUCT(top_level_children);

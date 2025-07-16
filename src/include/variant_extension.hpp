@@ -35,6 +35,39 @@ enum class VariantLogicalType : uint8_t {
 	ARRAY
 };
 
+struct VariantVector {
+	//! The 'keys' list (dictionary)
+	static Vector &GetKeys(Vector &vec) {
+		return *StructVector::GetEntries(vec)[0];
+	}
+	//! The 'key_ids' list
+	static Vector &GetKeyIds(Vector &vec) {
+		return *StructVector::GetEntries(vec)[1];
+	}
+	//! The 'children' list
+	static Vector &GetChildren(Vector &vec) {
+		return *StructVector::GetEntries(vec)[2];
+	}
+	//! The 'values' list
+	static Vector &GetValues(Vector &vec) {
+		return *StructVector::GetEntries(vec)[3];
+	}
+	//! The 'type_id' inside the 'values' list
+	static Vector &GetValuesTypeId(Vector &vec) {
+		auto &values = ListVector::GetEntry(GetValues(vec));
+		return *StructVector::GetEntries(values)[0];
+	}
+	//! The 'byte_offset' inside the 'values' list
+	static Vector &GetValuesByteOffset(Vector &vec) {
+		auto &values = ListVector::GetEntry(GetValues(vec));
+		return *StructVector::GetEntries(values)[1];
+	}
+	//! The binary blob 'value' encoding the Variant for the row
+	static Vector &GetValue(Vector &vec) {
+		return *StructVector::GetEntries(vec)[4];
+	}
+};
+
 class VariantExtension : public Extension {
 public:
 	void Load(DuckDB &db) override;
