@@ -40,17 +40,23 @@ struct VariantVector {
 	static Vector &GetKeys(Vector &vec) {
 		return *StructVector::GetEntries(vec)[0];
 	}
-	//! The 'key_ids' list
-	static Vector &GetKeyIds(Vector &vec) {
-		return *StructVector::GetEntries(vec)[1];
-	}
 	//! The 'children' list
 	static Vector &GetChildren(Vector &vec) {
-		return *StructVector::GetEntries(vec)[2];
+		return *StructVector::GetEntries(vec)[1];
+	}
+	//! The 'key_id' inside the 'children' list
+	static Vector &GetChildrenKeyId(Vector &vec) {
+		auto &children = ListVector::GetEntry(GetChildren(vec));
+		return *StructVector::GetEntries(children)[0];
+	}
+	//! The 'value_id' inside the 'children' list
+	static Vector &GetChildrenValueId(Vector &vec) {
+		auto &children = ListVector::GetEntry(GetChildren(vec));
+		return *StructVector::GetEntries(children)[1];
 	}
 	//! The 'values' list
 	static Vector &GetValues(Vector &vec) {
-		return *StructVector::GetEntries(vec)[3];
+		return *StructVector::GetEntries(vec)[2];
 	}
 	//! The 'type_id' inside the 'values' list
 	static Vector &GetValuesTypeId(Vector &vec) {
@@ -64,7 +70,7 @@ struct VariantVector {
 	}
 	//! The binary blob 'value' encoding the Variant for the row
 	static Vector &GetValue(Vector &vec) {
-		return *StructVector::GetEntries(vec)[4];
+		return *StructVector::GetEntries(vec)[3];
 	}
 };
 

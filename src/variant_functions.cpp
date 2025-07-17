@@ -41,13 +41,11 @@ public:
 		value_count += row_value_count;
 		children_count += row_children_count;
 		keys_count += row_keys_count;
-		key_ids_count += row_key_ids_count;
 
 		//! Reset the row-local counts
 		row_value_count = 0;
 		row_children_count = 0;
 		row_keys_count = 0;
-		row_key_ids_count = 0;
 	}
 
 public:
@@ -82,7 +80,6 @@ public:
 
 public:
 	idx_t children_count = 0;
-	idx_t key_ids_count = 0;
 	idx_t keys_count = 0;
 	idx_t key_id = 0;
 	idx_t value_count = 0;
@@ -102,8 +99,6 @@ public:
 	idx_t row_children_count = 0;
 	//! amount of keys in the row (unique)
 	idx_t row_keys_count = 0;
-	//! amount of key_ids in the row
-	idx_t row_key_ids_count = 0;
 	//! stream used to write the binary data
 	MemoryStream stream;
 };
@@ -114,7 +109,8 @@ static optional_idx ConvertJSON(yyjson_val *val, Vector &result, VariantConversi
 
 static bool ConvertJSONArray(yyjson_val *arr, Vector &result, VariantConversionState &state) {
 	auto &children = VariantVector::GetChildren(result);
-	auto &children_entry = ListVector::GetEntry(children);
+	auto &value_ids = VariantVector::GetChildrenValueId(result);
+	auto &key_ids = VariantVector::GetChildrenKeyId(result);
 
 	yyjson_arr_iter iter;
 	yyjson_arr_iter_init(arr, &iter);
@@ -132,7 +128,8 @@ static bool ConvertJSONArray(yyjson_val *arr, Vector &result, VariantConversionS
 	ListVector::Reserve(values, state.value_count + state.row_value_count + count);
 	ListVector::Reserve(children, state.children_count + state.row_children_count);
 
-	auto children_entry_data = FlatVector::GetData<uint32_t>(children_entry);
+	auto value_ids_data = FlatVector::GetData<uint32_t>(value_ids);
+	auto &key_ids_validity = FlatVector::Validity(key_ids);
 	//! Iterate over all the children in the Array
 	while (yyjson_arr_iter_has_next(&iter)) {
 		auto val = yyjson_arr_iter_next(&iter);
@@ -144,7 +141,8 @@ static bool ConvertJSONArray(yyjson_val *arr, Vector &result, VariantConversionS
 		}
 
 		//! Set the child index
-		children_entry_data[start_child_index++] = child_index;
+		key_ids_validity.SetInvalid(start_child_index);
+		value_ids_data[start_child_index++] = child_index;
 	}
 	return true;
 }
@@ -153,47 +151,35 @@ static bool ConvertJSONObject(yyjson_val *obj, Vector &result, VariantConversion
 	auto &keys = VariantVector::GetKeys(result);
 	auto &keys_entry = ListVector::GetEntry(keys);
 
-	auto &key_ids = VariantVector::GetKeyIds(result);
-	auto &key_ids_entry = ListVector::GetEntry(key_ids);
-
 	auto &children = VariantVector::GetChildren(result);
-	auto &children_entry = ListVector::GetEntry(children);
+
+	auto &key_ids = VariantVector::GetChildrenKeyId(result);
+	auto &value_ids = VariantVector::GetChildrenValueId(result);
 
 	yyjson_obj_iter iter;
 	yyjson_obj_iter_init(obj, &iter);
 
 	//! Write the 'value' blob for the OBJECT
 	uint32_t count = iter.max;
-	auto start_keys_index = state.key_ids_count + state.row_key_ids_count;
 	auto start_child_index = state.children_count + state.row_children_count;
 
 	VarintEncode(count, state.stream);
-	VarintEncode(state.row_key_ids_count, state.stream);
 	VarintEncode(state.row_children_count, state.stream);
 
-	auto keys_index = state.row_key_ids_count;
 	//! Reserve these indices for the object
-	state.row_key_ids_count += count;
 	state.row_children_count += count;
 
 	auto &values = VariantVector::GetValues(result);
 	ListVector::Reserve(values, state.value_count + state.row_value_count + count);
-	ListVector::Reserve(key_ids, state.key_ids_count + state.row_key_ids_count);
 	ListVector::Reserve(children, state.children_count + state.row_children_count);
 
-	auto key_ids_entry_data = FlatVector::GetData<uint32_t>(key_ids_entry);
-	auto children_entry_data = FlatVector::GetData<uint32_t>(children_entry);
+	auto key_ids_data = FlatVector::GetData<uint32_t>(key_ids);
+	auto value_ids_data = FlatVector::GetData<uint32_t>(value_ids);
 	//! Iterate over all the children in the Object
 	yyjson_val *key, *val;
 	while ((key = yyjson_obj_iter_next(&iter))) {
 		auto key_string = yyjson_get_str(key);
 		uint32_t key_string_len = unsafe_yyjson_get_len(key);
-
-		auto str = string_t(key_string, key_string_len);
-		(void)state.AddString(keys_entry, str);
-
-		//! Set the key_id
-		key_ids_entry_data[start_keys_index++] = keys_index++;
 
 		val = yyjson_obj_iter_get_val(key);
 		auto child_index = state.row_value_count;
@@ -201,8 +187,16 @@ static bool ConvertJSONObject(yyjson_val *obj, Vector &result, VariantConversion
 		if (!res.IsValid()) {
 			return false;
 		}
-		//! Set the child index
-		children_entry_data[start_child_index++] = child_index;
+
+		auto keys_index = state.row_keys_count;
+		auto str = string_t(key_string, key_string_len);
+		(void)state.AddString(keys_entry, str);
+
+		//! Set the key_id
+		key_ids_data[start_child_index] = keys_index;
+		//! Set the value_id
+		value_ids_data[start_child_index] = child_index;
+		start_child_index++;
 	}
 	return true;
 }
@@ -285,18 +279,17 @@ bool VariantFunctions::CastJSONToVARIANT(Vector &source, Vector &result, idx_t c
 	auto source_data = source_format.GetData<string_t>(source_format);
 	VariantConversionState state;
 
+	//! keys
 	auto &keys = VariantVector::GetKeys(result);
 	auto keys_data = FlatVector::GetData<list_entry_t>(keys);
 	ListVector::SetListSize(keys, 0);
 
-	auto &key_ids = VariantVector::GetKeyIds(result);
-	auto key_ids_data = FlatVector::GetData<list_entry_t>(key_ids);
-	ListVector::SetListSize(key_ids, 0);
-
+	//! children
 	auto &children = VariantVector::GetChildren(result);
 	auto children_data = FlatVector::GetData<list_entry_t>(children);
 	ListVector::SetListSize(children, 0);
 
+	//! values
 	auto &values = VariantVector::GetValues(result);
 	auto values_data = FlatVector::GetData<list_entry_t>(values);
 	ListVector::SetListSize(values, 0);
@@ -316,10 +309,6 @@ bool VariantFunctions::CastJSONToVARIANT(Vector &source, Vector &result, idx_t c
 		auto &keys_list_entry = keys_data[i];
 		keys_list_entry.offset = ListVector::GetListSize(keys);
 
-		//! key_ids
-		auto &key_ids_list_entry = key_ids_data[i];
-		key_ids_list_entry.offset = ListVector::GetListSize(key_ids);
-
 		//! children
 		auto &children_list_entry = children_data[i];
 		children_list_entry.offset = ListVector::GetListSize(children);
@@ -336,10 +325,6 @@ bool VariantFunctions::CastJSONToVARIANT(Vector &source, Vector &result, idx_t c
 		//! keys
 		keys_list_entry.length = state.row_keys_count;
 		ListVector::SetListSize(keys, keys_list_entry.offset + keys_list_entry.length);
-
-		//! key_ids
-		key_ids_list_entry.length = state.row_key_ids_count;
-		ListVector::SetListSize(key_ids, key_ids_list_entry.offset + key_ids_list_entry.length);
 
 		//! children
 		children_list_entry.length = state.row_children_count;
@@ -398,39 +383,35 @@ struct UnifiedVariantVector {
 	static UnifiedVectorFormat &GetKeysEntry(RecursiveUnifiedVectorFormat &vec) {
 		return vec.children[0].children[0].unified;
 	}
-	//! The 'key_ids' list
-	static UnifiedVectorFormat &GetKeyIds(RecursiveUnifiedVectorFormat &vec) {
-		return vec.children[1].unified;
-	}
-	//! The 'key_ids' list entry
-	static UnifiedVectorFormat &GetKeyIdsEntry(RecursiveUnifiedVectorFormat &vec) {
-		return vec.children[1].children[0].unified;
-	}
 	//! The 'children' list
 	static UnifiedVectorFormat &GetChildren(RecursiveUnifiedVectorFormat &vec) {
-		return vec.children[2].unified;
+		return vec.children[1].unified;
 	}
-	//! The 'children' list entry
-	static UnifiedVectorFormat &GetChildrenEntry(RecursiveUnifiedVectorFormat &vec) {
-		return vec.children[2].children[0].unified;
+	//! The 'key_id' inside the 'children' list
+	static UnifiedVectorFormat &GetChildrenKeyId(RecursiveUnifiedVectorFormat &vec) {
+		return vec.children[1].children[0].children[0].unified;
+	}
+	//! The 'value_id' inside the 'children' list
+	static UnifiedVectorFormat &GetChildrenValueId(RecursiveUnifiedVectorFormat &vec) {
+		return vec.children[1].children[0].children[1].unified;
 	}
 	//! The 'values' list
 	static UnifiedVectorFormat &GetValues(RecursiveUnifiedVectorFormat &vec) {
-		return vec.children[3].unified;
+		return vec.children[2].unified;
 	}
 	//! The 'type_id' inside the 'values' list
 	static UnifiedVectorFormat &GetValuesTypeId(RecursiveUnifiedVectorFormat &vec) {
-		auto &values = vec.children[3];
+		auto &values = vec.children[2];
 		return values.children[0].children[0].unified;
 	}
 	//! The 'byte_offset' inside the 'values' list
 	static UnifiedVectorFormat &GetValuesByteOffset(RecursiveUnifiedVectorFormat &vec) {
-		auto &values = vec.children[3];
+		auto &values = vec.children[2];
 		return values.children[0].children[1].unified;
 	}
 	//! The binary blob 'value' encoding the Variant for the row
 	static UnifiedVectorFormat &GetValue(RecursiveUnifiedVectorFormat &vec) {
-		return vec.children[4].unified;
+		return vec.children[3].unified;
 	}
 };
 
@@ -452,8 +433,14 @@ yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat
 	//! children
 	auto &children = UnifiedVariantVector::GetChildren(source);
 	auto children_data = children.GetData<list_entry_t>(children);
-	auto &children_entry = UnifiedVariantVector::GetChildrenEntry(source);
-	auto children_entry_data = children_entry.GetData<uint32_t>(children_entry);
+
+	//! value_ids
+	auto &value_ids = UnifiedVariantVector::GetChildrenValueId(source);
+	auto value_ids_data = value_ids.GetData<uint32_t>(value_ids);
+
+	//! key_ids
+	auto &key_ids = UnifiedVariantVector::GetChildrenKeyId(source);
+	auto key_ids_data = key_ids.GetData<uint32_t>(key_ids);
 
 	//! keys
 	auto &keys = UnifiedVariantVector::GetKeys(source);
@@ -461,17 +448,10 @@ yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat
 	auto &keys_entry = UnifiedVariantVector::GetKeysEntry(source);
 	auto keys_entry_data = keys_entry.GetData<string_t>(keys_entry);
 
-	//! key_ids
-	auto &key_ids = UnifiedVariantVector::GetKeyIds(source);
-	auto key_ids_data = key_ids.GetData<list_entry_t>(key_ids);
-	auto &key_ids_entry = UnifiedVariantVector::GetKeyIdsEntry(source);
-	auto key_ids_entry_data = key_ids_entry.GetData<uint32_t>(key_ids_entry);
-
 	//! list entries
-	auto values_list_entry = values_data[values.sel->get_index(row)];
-	auto children_list_entry = children_data[children.sel->get_index(row)];
 	auto keys_list_entry = keys_data[keys.sel->get_index(row)];
-	auto key_ids_list_entry = key_ids_data[key_ids.sel->get_index(row)];
+	auto children_list_entry = children_data[children.sel->get_index(row)];
+	auto values_list_entry = values_data[values.sel->get_index(row)];
 
 	//! The 'values' data of the value we're currently converting
 	values_idx += values_list_entry.offset;
@@ -517,8 +497,8 @@ yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat
 		}
 		auto child_index_start = VarintDecode<uint32_t>(ptr);
 		for (idx_t i = 0; i < count; i++) {
-			auto index = children_entry.sel->get_index(children_list_entry.offset + child_index_start + i);
-			auto child_index = children_entry_data[index];
+			auto index = value_ids.sel->get_index(children_list_entry.offset + child_index_start + i);
+			auto child_index = value_ids_data[index];
 			auto val = ConvertVariant(doc, source, row, child_index);
 			if (!val) {
 				return nullptr;
@@ -533,18 +513,17 @@ yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat
 		if (!count) {
 			return obj;
 		}
-		auto keys_index_start = VarintDecode<uint32_t>(ptr);
 		auto child_index_start = VarintDecode<uint32_t>(ptr);
 
 		for (idx_t i = 0; i < count; i++) {
-			auto children_index = children_entry.sel->get_index(children_list_entry.offset + child_index_start + i);
-			auto child_value_idx = children_entry_data[children_index];
+			auto children_index = value_ids.sel->get_index(children_list_entry.offset + child_index_start + i);
+			auto child_value_idx = value_ids_data[children_index];
 			auto val = ConvertVariant(doc, source, row, child_value_idx);
 			if (!val) {
 				return nullptr;
 			}
-			auto key_ids_index = key_ids_entry.sel->get_index(key_ids_list_entry.offset + keys_index_start + i);
-			auto child_key_id = key_ids_entry_data[key_ids_index];
+			auto key_ids_index = key_ids.sel->get_index(children_list_entry.offset + child_index_start + i);
+			auto child_key_id = key_ids_data[key_ids_index];
 			auto &key = keys_entry_data[keys_entry.sel->get_index(keys_list_entry.offset + child_key_id)];
 			yyjson_mut_obj_put(obj, yyjson_mut_strncpy(doc, key.GetData(), key.GetSize()), val);
 		}
