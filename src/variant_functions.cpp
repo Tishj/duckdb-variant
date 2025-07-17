@@ -37,6 +37,7 @@ public:
 		row_keys_count = 0;
 		row_key_ids_count = 0;
 	}
+
 public:
 	uint32_t AddString(Vector &vec, string_t str) {
 		auto it = dictionary.find(str);
@@ -66,6 +67,7 @@ public:
 		sel_vec.set_index(keys_idx, dict_index);
 		return keys_idx;
 	}
+
 public:
 	idx_t children_count = 0;
 	idx_t key_ids_count = 0;
@@ -78,6 +80,7 @@ public:
 	//! Unsure uniqueness of the dictionary entries
 	string_map_t<idx_t> dictionary;
 	idx_t dictionary_capacity = STANDARD_VECTOR_SIZE;
+
 public:
 	//! State for the current row
 
@@ -100,7 +103,6 @@ static optional_idx ConvertJSON(yyjson_val *val, Vector &result, VariantConversi
 static bool ConvertJSONArray(yyjson_val *arr, Vector &result, VariantConversionState &state) {
 	auto &children = VariantVector::GetChildren(result);
 	auto &children_entry = ListVector::GetEntry(children);
-	auto children_entry_data = FlatVector::GetData<uint32_t>(children_entry);
 
 	yyjson_arr_iter iter;
 	yyjson_arr_iter_init(arr, &iter);
@@ -109,7 +111,7 @@ static bool ConvertJSONArray(yyjson_val *arr, Vector &result, VariantConversionS
 	uint32_t count = iter.max;
 	auto start_child_index = state.children_count + state.row_children_count;
 	state.stream.WriteData(const_data_ptr_cast(&count), sizeof(uint32_t));
-	state.stream.WriteData(const_data_ptr_cast(&start_child_index), sizeof(uint32_t));
+	state.stream.WriteData(const_data_ptr_cast(&state.row_children_count), sizeof(uint32_t));
 
 	//! Reserve these indices for the array
 	state.row_children_count += count;
@@ -118,17 +120,19 @@ static bool ConvertJSONArray(yyjson_val *arr, Vector &result, VariantConversionS
 	ListVector::Reserve(values, state.value_count + state.row_value_count + count);
 	ListVector::Reserve(children, state.children_count + state.row_children_count);
 
+	auto children_entry_data = FlatVector::GetData<uint32_t>(children_entry);
 	//! Iterate over all the children in the Array
 	while (yyjson_arr_iter_has_next(&iter)) {
 		auto val = yyjson_arr_iter_next(&iter);
 
-		auto child_index = ConvertJSON(val, result, state);
-		if (!child_index.IsValid()) {
+		auto child_index = state.row_value_count;
+		auto res = ConvertJSON(val, result, state);
+		if (!res.IsValid()) {
 			return false;
 		}
 
 		//! Set the child index
-		children_entry_data[start_child_index++] = child_index.GetIndex();
+		children_entry_data[start_child_index++] = child_index;
 	}
 	return true;
 }
@@ -139,11 +143,9 @@ static bool ConvertJSONObject(yyjson_val *obj, Vector &result, VariantConversion
 
 	auto &key_ids = VariantVector::GetKeyIds(result);
 	auto &key_ids_entry = ListVector::GetEntry(key_ids);
-	auto key_ids_entry_data = FlatVector::GetData<uint32_t>(key_ids_entry);
 
 	auto &children = VariantVector::GetChildren(result);
 	auto &children_entry = ListVector::GetEntry(children);
-	auto children_entry_data = FlatVector::GetData<uint32_t>(children_entry);
 
 	yyjson_obj_iter iter;
 	yyjson_obj_iter_init(obj, &iter);
@@ -153,9 +155,10 @@ static bool ConvertJSONObject(yyjson_val *obj, Vector &result, VariantConversion
 	auto start_keys_index = state.key_ids_count + state.row_key_ids_count;
 	auto start_child_index = state.children_count + state.row_children_count;
 	state.stream.WriteData(const_data_ptr_cast(&count), sizeof(uint32_t));
-	state.stream.WriteData(const_data_ptr_cast(&start_keys_index), sizeof(uint32_t));
-	state.stream.WriteData(const_data_ptr_cast(&start_child_index), sizeof(uint32_t));
+	state.stream.WriteData(const_data_ptr_cast(&state.row_key_ids_count), sizeof(uint32_t));
+	state.stream.WriteData(const_data_ptr_cast(&state.row_children_count), sizeof(uint32_t));
 
+	auto keys_index = state.row_key_ids_count;
 	//! Reserve these indices for the object
 	state.row_key_ids_count += count;
 	state.row_children_count += count;
@@ -165,6 +168,8 @@ static bool ConvertJSONObject(yyjson_val *obj, Vector &result, VariantConversion
 	ListVector::Reserve(key_ids, state.key_ids_count + state.row_key_ids_count);
 	ListVector::Reserve(children, state.children_count + state.row_children_count);
 
+	auto key_ids_entry_data = FlatVector::GetData<uint32_t>(key_ids_entry);
+	auto children_entry_data = FlatVector::GetData<uint32_t>(children_entry);
 	//! Iterate over all the children in the Object
 	yyjson_val *key, *val;
 	while ((key = yyjson_obj_iter_next(&iter))) {
@@ -172,18 +177,19 @@ static bool ConvertJSONObject(yyjson_val *obj, Vector &result, VariantConversion
 		uint32_t key_string_len = unsafe_yyjson_get_len(key);
 
 		auto str = string_t(key_string, key_string_len);
-		auto keys_index = state.AddString(keys_entry, str);
+		(void)state.AddString(keys_entry, str);
 
 		//! Set the key_id
-		key_ids_entry_data[start_keys_index++] = keys_index;
+		key_ids_entry_data[start_keys_index++] = keys_index++;
 
 		val = yyjson_obj_iter_get_val(key);
-		auto child_index = ConvertJSON(val, result, state);
-		if (!child_index.IsValid()) {
+		auto child_index = state.row_value_count;
+		auto res = ConvertJSON(val, result, state);
+		if (!res.IsValid()) {
 			return false;
 		}
 		//! Set the child index
-		children_entry_data[start_child_index++] = child_index.GetIndex();
+		children_entry_data[start_child_index++] = child_index;
 	}
 	return true;
 }
@@ -447,72 +453,72 @@ yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat
 	auto blob_data = const_data_ptr_cast(blob.GetData());
 
 	switch (type_id) {
-		case VariantLogicalType::VARIANT_NULL:
-			return yyjson_mut_null(doc);
-		case VariantLogicalType::BOOL_TRUE:
-			return yyjson_mut_true(doc);
-		case VariantLogicalType::BOOL_FALSE:
-			return yyjson_mut_false(doc);
-		case VariantLogicalType::INT64: {
-			auto val = Load<int64_t>(blob_data + byte_offset);
-			return yyjson_mut_sint(doc, val);
-		}
-		case VariantLogicalType::UINT64: {
-			auto val = Load<uint64_t>(blob_data + byte_offset);
-			return yyjson_mut_uint(doc, val);
-		}
-		case VariantLogicalType::DOUBLE: {
-			auto val = Load<double>(blob_data + byte_offset);
-			return yyjson_mut_real(doc, val);
-		}
-		case VariantLogicalType::VARCHAR: {
-			auto string_length = Load<uint32_t>(blob_data + byte_offset);
-			auto string_data = reinterpret_cast<const char *>(blob_data + byte_offset + sizeof(uint32_t));
-			return yyjson_mut_strncpy(doc, string_data, static_cast<size_t>(string_length));
-		}
-		case VariantLogicalType::ARRAY: {
-			auto count = Load<uint32_t>(blob_data + byte_offset);
-			auto arr = yyjson_mut_arr(doc);
-			if (!count) {
-				return arr;
-			}
-			auto child_index_start = Load<uint32_t>(blob_data + byte_offset + sizeof(uint32_t));
-			for (idx_t i = 0; i < count; i++) {
-				auto index = children_entry.sel->get_index(children_list_entry.offset + child_index_start + i);
-				auto child_index = children_entry_data[index];
-				auto val = ConvertVariant(doc, source, row, child_index);
-				if (!val) {
-					return nullptr;
-				}
-				yyjson_mut_arr_add_val(arr, val);
-			}
+	case VariantLogicalType::VARIANT_NULL:
+		return yyjson_mut_null(doc);
+	case VariantLogicalType::BOOL_TRUE:
+		return yyjson_mut_true(doc);
+	case VariantLogicalType::BOOL_FALSE:
+		return yyjson_mut_false(doc);
+	case VariantLogicalType::INT64: {
+		auto val = Load<int64_t>(blob_data + byte_offset);
+		return yyjson_mut_sint(doc, val);
+	}
+	case VariantLogicalType::UINT64: {
+		auto val = Load<uint64_t>(blob_data + byte_offset);
+		return yyjson_mut_uint(doc, val);
+	}
+	case VariantLogicalType::DOUBLE: {
+		auto val = Load<double>(blob_data + byte_offset);
+		return yyjson_mut_real(doc, val);
+	}
+	case VariantLogicalType::VARCHAR: {
+		auto string_length = Load<uint32_t>(blob_data + byte_offset);
+		auto string_data = reinterpret_cast<const char *>(blob_data + byte_offset + sizeof(uint32_t));
+		return yyjson_mut_strncpy(doc, string_data, static_cast<size_t>(string_length));
+	}
+	case VariantLogicalType::ARRAY: {
+		auto count = Load<uint32_t>(blob_data + byte_offset);
+		auto arr = yyjson_mut_arr(doc);
+		if (!count) {
 			return arr;
 		}
-		case VariantLogicalType::OBJECT: {
-			auto count = Load<uint32_t>(blob_data + byte_offset);
-			auto obj = yyjson_mut_obj(doc);
-			if (!count) {
-				return obj;
+		auto child_index_start = Load<uint32_t>(blob_data + byte_offset + sizeof(uint32_t));
+		for (idx_t i = 0; i < count; i++) {
+			auto index = children_entry.sel->get_index(children_list_entry.offset + child_index_start + i);
+			auto child_index = children_entry_data[index];
+			auto val = ConvertVariant(doc, source, row, child_index);
+			if (!val) {
+				return nullptr;
 			}
-			auto keys_index_start = Load<uint32_t>(blob_data + byte_offset + sizeof(uint32_t));
-			auto child_index_start = Load<uint32_t>(blob_data + byte_offset + sizeof(uint32_t) + sizeof(uint32_t));
-
-			for (idx_t i = 0; i < count; i++) {
-				auto children_index = children_entry.sel->get_index(children_list_entry.offset + child_index_start + i);
-				auto child_value_idx = children_entry_data[children_index];
-				auto val = ConvertVariant(doc, source, row, child_value_idx);
-				if (!val) {
-					return nullptr;
-				}
-				auto key_ids_index = key_ids_entry.sel->get_index(key_ids_list_entry.offset + keys_index_start + i);
-				auto child_key_id = key_ids_entry_data[key_ids_index];
-				auto &key = keys_entry_data[keys_entry.sel->get_index(keys_list_entry.offset + child_key_id)];
-				yyjson_mut_obj_put(obj, yyjson_mut_strncpy(doc, key.GetData(), key.GetSize()), val);
-			}
+			yyjson_mut_arr_add_val(arr, val);
+		}
+		return arr;
+	}
+	case VariantLogicalType::OBJECT: {
+		auto count = Load<uint32_t>(blob_data + byte_offset);
+		auto obj = yyjson_mut_obj(doc);
+		if (!count) {
 			return obj;
 		}
-		default:
-			throw InternalException("VariantLogicalType(%d) not handled", static_cast<uint8_t>(type_id));
+		auto keys_index_start = Load<uint32_t>(blob_data + byte_offset + sizeof(uint32_t));
+		auto child_index_start = Load<uint32_t>(blob_data + byte_offset + sizeof(uint32_t) + sizeof(uint32_t));
+
+		for (idx_t i = 0; i < count; i++) {
+			auto children_index = children_entry.sel->get_index(children_list_entry.offset + child_index_start + i);
+			auto child_value_idx = children_entry_data[children_index];
+			auto val = ConvertVariant(doc, source, row, child_value_idx);
+			if (!val) {
+				return nullptr;
+			}
+			auto key_ids_index = key_ids_entry.sel->get_index(key_ids_list_entry.offset + keys_index_start + i);
+			auto child_key_id = key_ids_entry_data[key_ids_index];
+			auto &key = keys_entry_data[keys_entry.sel->get_index(keys_list_entry.offset + child_key_id)];
+			yyjson_mut_obj_put(obj, yyjson_mut_strncpy(doc, key.GetData(), key.GetSize()), val);
+		}
+		return obj;
+	}
+	default:
+		throw InternalException("VariantLogicalType(%d) not handled", static_cast<uint8_t>(type_id));
 	}
 
 	return nullptr;
@@ -525,7 +531,7 @@ bool VariantFunctions::CastVARIANTToJSON(Vector &source, Vector &result, idx_t c
 	auto result_data = FlatVector::GetData<string_t>(result);
 	auto doc = yyjson_mut_doc_new(nullptr);
 	for (idx_t i = 0; i < count; i++) {
-		
+
 		auto json_val = ConvertVariant(doc, source_format, i, 0);
 		if (!json_val) {
 			return false;
@@ -533,8 +539,7 @@ bool VariantFunctions::CastVARIANTToJSON(Vector &source, Vector &result, idx_t c
 
 		//! TODO: make this safe (add a destructor to hold this heap-allocated memory)
 		size_t len;
-		auto json_data =
-		    yyjson_mut_val_write_opts(json_val, YYJSON_WRITE_ALLOW_INF_AND_NAN, nullptr, &len, nullptr);
+		auto json_data = yyjson_mut_val_write_opts(json_val, YYJSON_WRITE_ALLOW_INF_AND_NAN, nullptr, &len, nullptr);
 		if (!json_data) {
 			throw InvalidInputException("Could not serialize the JSON to string, yyjson failed");
 		}
