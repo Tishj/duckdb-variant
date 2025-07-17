@@ -10,17 +10,17 @@ require variant
 query I
 select '"test"'::JSON::VARIANT;
 ----
-{'keys': [], 'key_ids': [], 'children': [], 'values': [{'type_id': 16, 'byte_offset': 0}], 'data': \x04\x00\x00\x00test}
+{'keys': [], 'key_ids': [], 'children': [], 'values': [{'type_id': 16, 'byte_offset': 0}], 'data': \x04test}
 
 query I
 select ['"test"' for _ in range(10)]::JSON::VARIANT;
 ----
-{'keys': [], 'key_ids': [], 'children': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 'values': [{'type_id': 27, 'byte_offset': 0}, {'type_id': 16, 'byte_offset': 8}, {'type_id': 16, 'byte_offset': 18}, {'type_id': 16, 'byte_offset': 28}, {'type_id': 16, 'byte_offset': 38}, {'type_id': 16, 'byte_offset': 48}, {'type_id': 16, 'byte_offset': 58}, {'type_id': 16, 'byte_offset': 68}, {'type_id': 16, 'byte_offset': 78}, {'type_id': 16, 'byte_offset': 88}, {'type_id': 16, 'byte_offset': 98}], 'data': \x0A\x00\x00\x00\x00\x00\x00\x00\x06\x00\x00\x00\x22test\x22\x06\x00\x00\x00\x22test\x22\x06\x00\x00\x00\x22test\x22\x06\x00\x00\x00\x22test\x22\x06\x00\x00\x00\x22test\x22\x06\x00\x00\x00\x22test\x22\x06\x00\x00\x00\x22test\x22\x06\x00\x00\x00\x22test\x22\x06\x00\x00\x00\x22test\x22\x06\x00\x00\x00\x22test\x22}
+{'keys': [], 'key_ids': [], 'children': [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 'values': [{'type_id': 27, 'byte_offset': 0}, {'type_id': 16, 'byte_offset': 2}, {'type_id': 16, 'byte_offset': 9}, {'type_id': 16, 'byte_offset': 16}, {'type_id': 16, 'byte_offset': 23}, {'type_id': 16, 'byte_offset': 30}, {'type_id': 16, 'byte_offset': 37}, {'type_id': 16, 'byte_offset': 44}, {'type_id': 16, 'byte_offset': 51}, {'type_id': 16, 'byte_offset': 58}, {'type_id': 16, 'byte_offset': 65}], 'data': \x0A\x00\x06\x22test\x22\x06\x22test\x22\x06\x22test\x22\x06\x22test\x22\x06\x22test\x22\x06\x22test\x22\x06\x22test\x22\x06\x22test\x22\x06\x22test\x22\x06\x22test\x22}
 
 query I
 select '{"hello": [1,2,true, false, null], "test": [1, {"test": false}, ["blob", "this is a long string", 123]]}'::JSON::VARIANT;
 ----
-{'keys': [hello, test, test], 'key_ids': [0, 1, 2], 'children': [1, 7, 2, 3, 4, 5, 6, 8, 9, 11, 10, 12, 13, 14], 'values': [{'type_id': 26, 'byte_offset': 0}, {'type_id': 27, 'byte_offset': 12}, {'type_id': 11, 'byte_offset': 20}, {'type_id': 11, 'byte_offset': 28}, {'type_id': 1, 'byte_offset': 36}, {'type_id': 2, 'byte_offset': 36}, {'type_id': 0, 'byte_offset': 36}, {'type_id': 27, 'byte_offset': 36}, {'type_id': 11, 'byte_offset': 44}, {'type_id': 26, 'byte_offset': 52}, {'type_id': 2, 'byte_offset': 64}, {'type_id': 27, 'byte_offset': 64}, {'type_id': 16, 'byte_offset': 72}, {'type_id': 16, 'byte_offset': 80}, {'type_id': 11, 'byte_offset': 105}], 'data': '\\x02\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x05\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\x00\\x00\\x00\\x07\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x0A\\x00\\x00\\x00\\x03\\x00\\x00\\x00\\x0B\\x00\\x00\\x00\\x04\\x00\\x00\\x00blob\\x15\\x00\\x00\\x00this is a long string{\\x00\\x00\\x00\\x00\\x00\\x00\\x00'}
+{'keys': [hello, test, test], 'key_ids': [0, 1, 2], 'children': [1, 7, 2, 3, 4, 5, 6, 8, 9, 11, 10, 12, 13, 14], 'values': [{'type_id': 26, 'byte_offset': 0}, {'type_id': 27, 'byte_offset': 3}, {'type_id': 11, 'byte_offset': 5}, {'type_id': 11, 'byte_offset': 6}, {'type_id': 1, 'byte_offset': 7}, {'type_id': 2, 'byte_offset': 7}, {'type_id': 0, 'byte_offset': 7}, {'type_id': 27, 'byte_offset': 7}, {'type_id': 11, 'byte_offset': 9}, {'type_id': 26, 'byte_offset': 10}, {'type_id': 2, 'byte_offset': 13}, {'type_id': 27, 'byte_offset': 13}, {'type_id': 16, 'byte_offset': 15}, {'type_id': 16, 'byte_offset': 20}, {'type_id': 11, 'byte_offset': 42}], 'data': '\\x02\\x00\\x00\\x05\\x02\\x01\\x02\\x03\\x07\\x01\\x01\\x02\\x0A\\x03\\x0B\\x04blob\\x15this is a long string{'}
 
 # ---------- VARIANT -> JSON ----------
 

@@ -15,6 +15,18 @@ namespace {
 
 //! ------------ JSON -> Variant ------------
 
+template <class T>
+static void VarintEncode(T val, MemoryStream &ser) {
+	do {
+		uint8_t byte = val & 127;
+		val >>= 7;
+		if (val != 0) {
+			byte |= 128;
+		}
+		ser.WriteData(&byte, sizeof(uint8_t));
+	} while (val != 0);
+}
+
 struct VariantConversionState {
 public:
 	explicit VariantConversionState() {
@@ -110,8 +122,8 @@ static bool ConvertJSONArray(yyjson_val *arr, Vector &result, VariantConversionS
 	//! Write the 'value' blob for the ARRAY
 	uint32_t count = iter.max;
 	auto start_child_index = state.children_count + state.row_children_count;
-	state.stream.WriteData(const_data_ptr_cast(&count), sizeof(uint32_t));
-	state.stream.WriteData(const_data_ptr_cast(&state.row_children_count), sizeof(uint32_t));
+	VarintEncode(count, state.stream);
+	VarintEncode(state.row_children_count, state.stream);
 
 	//! Reserve these indices for the array
 	state.row_children_count += count;
@@ -154,9 +166,10 @@ static bool ConvertJSONObject(yyjson_val *obj, Vector &result, VariantConversion
 	uint32_t count = iter.max;
 	auto start_keys_index = state.key_ids_count + state.row_key_ids_count;
 	auto start_child_index = state.children_count + state.row_children_count;
-	state.stream.WriteData(const_data_ptr_cast(&count), sizeof(uint32_t));
-	state.stream.WriteData(const_data_ptr_cast(&state.row_key_ids_count), sizeof(uint32_t));
-	state.stream.WriteData(const_data_ptr_cast(&state.row_children_count), sizeof(uint32_t));
+
+	VarintEncode(count, state.stream);
+	VarintEncode(state.row_key_ids_count, state.stream);
+	VarintEncode(state.row_children_count, state.stream);
 
 	auto keys_index = state.row_key_ids_count;
 	//! Reserve these indices for the object
@@ -215,7 +228,7 @@ static optional_idx ConvertJSON(yyjson_val *val, Vector &result, VariantConversi
 	case YYJSON_TYPE_RAW | YYJSON_SUBTYPE_NONE: {
 		auto str = unsafe_yyjson_get_str(val);
 		uint32_t length = unsafe_yyjson_get_len(val);
-		state.stream.WriteData(const_data_ptr_cast(&length), sizeof(uint32_t));
+		VarintEncode(length, state.stream);
 		state.stream.WriteData(const_data_ptr_cast(str), length);
 		type_ids_data[index] = static_cast<uint8_t>(VariantLogicalType::VARCHAR);
 		break;
@@ -244,13 +257,13 @@ static optional_idx ConvertJSON(yyjson_val *val, Vector &result, VariantConversi
 	}
 	case YYJSON_TYPE_NUM | YYJSON_SUBTYPE_UINT: {
 		auto value = unsafe_yyjson_get_uint(val);
-		state.stream.WriteData(const_data_ptr_cast(&value), sizeof(uint64_t));
+		VarintEncode(value, state.stream);
 		type_ids_data[index] = static_cast<uint8_t>(VariantLogicalType::UINT64);
 		break;
 	}
 	case YYJSON_TYPE_NUM | YYJSON_SUBTYPE_SINT: {
 		auto value = unsafe_yyjson_get_sint(val);
-		state.stream.WriteData(const_data_ptr_cast(&value), sizeof(int64_t));
+		VarintEncode(value, state.stream);
 		type_ids_data[index] = static_cast<uint8_t>(VariantLogicalType::INT64);
 		break;
 	}
@@ -357,6 +370,25 @@ bool VariantFunctions::CastJSONToVARIANT(Vector &source, Vector &result, idx_t c
 
 namespace {
 
+template <class T>
+static T VarintDecode(const_data_ptr_t &ptr) {
+	T result = 0;
+	uint8_t shift = 0;
+	while (true) {
+		uint8_t byte;
+		byte = *(ptr++);
+		result |= T(byte & 127) << shift;
+		if ((byte & 128) == 0) {
+			break;
+		}
+		shift += 7;
+		if (shift > sizeof(T) * 8) {
+			throw std::runtime_error("Varint-decoding found too large number");
+		}
+	}
+	return result;
+}
+
 struct UnifiedVariantVector {
 	//! The 'keys' list (dictionary)
 	static UnifiedVectorFormat &GetKeys(RecursiveUnifiedVectorFormat &vec) {
@@ -452,6 +484,7 @@ yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat
 	auto &blob = value_data[row];
 	auto blob_data = const_data_ptr_cast(blob.GetData());
 
+	auto ptr = const_data_ptr_cast(blob_data + byte_offset);
 	switch (type_id) {
 	case VariantLogicalType::VARIANT_NULL:
 		return yyjson_mut_null(doc);
@@ -460,29 +493,29 @@ yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat
 	case VariantLogicalType::BOOL_FALSE:
 		return yyjson_mut_false(doc);
 	case VariantLogicalType::INT64: {
-		auto val = Load<int64_t>(blob_data + byte_offset);
+		auto val = VarintDecode<int64_t>(ptr);
 		return yyjson_mut_sint(doc, val);
 	}
 	case VariantLogicalType::UINT64: {
-		auto val = Load<uint64_t>(blob_data + byte_offset);
+		auto val = VarintDecode<uint64_t>(ptr);
 		return yyjson_mut_uint(doc, val);
 	}
 	case VariantLogicalType::DOUBLE: {
-		auto val = Load<double>(blob_data + byte_offset);
+		auto val = Load<double>(ptr);
 		return yyjson_mut_real(doc, val);
 	}
 	case VariantLogicalType::VARCHAR: {
-		auto string_length = Load<uint32_t>(blob_data + byte_offset);
-		auto string_data = reinterpret_cast<const char *>(blob_data + byte_offset + sizeof(uint32_t));
+		auto string_length = VarintDecode<uint32_t>(ptr);
+		auto string_data = reinterpret_cast<const char *>(ptr);
 		return yyjson_mut_strncpy(doc, string_data, static_cast<size_t>(string_length));
 	}
 	case VariantLogicalType::ARRAY: {
-		auto count = Load<uint32_t>(blob_data + byte_offset);
+		auto count = VarintDecode<uint32_t>(ptr);
 		auto arr = yyjson_mut_arr(doc);
 		if (!count) {
 			return arr;
 		}
-		auto child_index_start = Load<uint32_t>(blob_data + byte_offset + sizeof(uint32_t));
+		auto child_index_start = VarintDecode<uint32_t>(ptr);
 		for (idx_t i = 0; i < count; i++) {
 			auto index = children_entry.sel->get_index(children_list_entry.offset + child_index_start + i);
 			auto child_index = children_entry_data[index];
@@ -495,13 +528,13 @@ yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat
 		return arr;
 	}
 	case VariantLogicalType::OBJECT: {
-		auto count = Load<uint32_t>(blob_data + byte_offset);
+		auto count = VarintDecode<uint32_t>(ptr);
 		auto obj = yyjson_mut_obj(doc);
 		if (!count) {
 			return obj;
 		}
-		auto keys_index_start = Load<uint32_t>(blob_data + byte_offset + sizeof(uint32_t));
-		auto child_index_start = Load<uint32_t>(blob_data + byte_offset + sizeof(uint32_t) + sizeof(uint32_t));
+		auto keys_index_start = VarintDecode<uint32_t>(ptr);
+		auto child_index_start = VarintDecode<uint32_t>(ptr);
 
 		for (idx_t i = 0; i < count; i++) {
 			auto children_index = children_entry.sel->get_index(children_list_entry.offset + child_index_start + i);
