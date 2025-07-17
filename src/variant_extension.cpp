@@ -40,6 +40,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 	                                    VariantFunctions::CastJSONToVARIANT);
 	ExtensionUtil::RegisterCastFunction(instance, variant_type, LogicalType::JSON(),
 	                                    VariantFunctions::CastVARIANTToJSON);
+	ExtensionUtil::RegisterCastFunction(instance, LogicalType::ANY, variant_type, VariantFunctions::CastToVARIANT);
 }
 
 void VariantExtension::Load(DuckDB &db) {
