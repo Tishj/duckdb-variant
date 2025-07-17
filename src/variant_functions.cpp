@@ -43,15 +43,26 @@ public:
 
 		uint32_t dict_index;
 		if (it == dictionary.end()) {
-			//! TODO: check the capacity of the vec to see if we need to grow it first
 			auto vec_data = FlatVector::GetData<string_t>(vec);
 			auto dict_count = dictionary.size();
+			if (dict_count >= dictionary_capacity) {
+				auto new_capacity = NextPowerOfTwo(dictionary_capacity + 1);
+				vec.Resize(dictionary_capacity, new_capacity);
+				dictionary_capacity = new_capacity;
+			}
 			vec_data[dict_count] = StringVector::AddStringOrBlob(vec, std::move(str));
 			it = dictionary.emplace(vec_data[dict_count], dict_count).first;
 		}
 		dict_index = it->second;
 		auto keys_idx = keys_count + row_keys_count++;
-		//! TODO: check the `GetSize()` on the AllocatedData in the SelectionData of the SelectionVector to see if we need to grow first
+		if (!sel_vec_capacity || keys_idx >= sel_vec_capacity) {
+			//! Reinitialize the selection vector
+			auto new_capacity = !sel_vec_capacity ? STANDARD_VECTOR_SIZE : NextPowerOfTwo(sel_vec_capacity + 1);
+			auto new_selection_data = make_shared_ptr<SelectionData>(new_capacity);
+			memcpy(new_selection_data->owned_data.get(), sel_vec.data(), sizeof(sel_t) * sel_vec_capacity);
+			sel_vec.Initialize(std::move(new_selection_data));
+			sel_vec_capacity = new_capacity;
+		}
 		sel_vec.set_index(keys_idx, dict_index);
 		return keys_idx;
 	}
@@ -63,8 +74,10 @@ public:
 	idx_t value_count = 0;
 	//! Record the relationship between index in the 'keys' (child) and the index in the dictionary
 	SelectionVector sel_vec;
+	idx_t sel_vec_capacity = 0;
 	//! Unsure uniqueness of the dictionary entries
 	string_map_t<idx_t> dictionary;
+	idx_t dictionary_capacity = STANDARD_VECTOR_SIZE;
 public:
 	//! State for the current row
 
@@ -100,6 +113,10 @@ static bool ConvertJSONArray(yyjson_val *arr, Vector &result, VariantConversionS
 
 	//! Reserve these indices for the array
 	state.row_children_count += count;
+
+	auto &values = VariantVector::GetValues(result);
+	ListVector::Reserve(values, state.value_count + state.row_value_count + count);
+	ListVector::Reserve(children, state.children_count + state.row_children_count);
 
 	//! Iterate over all the children in the Array
 	while (yyjson_arr_iter_has_next(&iter)) {
@@ -142,6 +159,12 @@ static bool ConvertJSONObject(yyjson_val *obj, Vector &result, VariantConversion
 	//! Reserve these indices for the object
 	state.row_key_ids_count += count;
 	state.row_children_count += count;
+
+	auto &values = VariantVector::GetValues(result);
+	ListVector::Reserve(values, state.value_count + state.row_value_count + count);
+	ListVector::Reserve(key_ids, state.key_ids_count + state.row_key_ids_count);
+	ListVector::Reserve(children, state.children_count + state.row_children_count);
+
 	//! Iterate over all the children in the Object
 	yyjson_val *key, *val;
 	while ((key = yyjson_obj_iter_next(&iter))) {
@@ -242,7 +265,6 @@ bool VariantFunctions::CastJSONToVARIANT(Vector &source, Vector &result, idx_t c
 	source.ToUnifiedFormat(count, source_format);
 	auto source_data = source_format.GetData<string_t>(source_format);
 	VariantConversionState state;
-	state.sel_vec.Initialize(STANDARD_VECTOR_SIZE);
 
 	auto &keys = VariantVector::GetKeys(result);
 	auto keys_data = FlatVector::GetData<list_entry_t>(keys);
@@ -263,6 +285,7 @@ bool VariantFunctions::CastJSONToVARIANT(Vector &source, Vector &result, idx_t c
 	auto &value = VariantVector::GetValue(result);
 	auto value_data = FlatVector::GetData<string_t>(value);
 
+	ListVector::Reserve(values, state.value_count + state.row_value_count + count);
 	for (idx_t i = 0; i < count; i++) {
 		auto source_index = source_format.sel->get_index(i);
 		auto &val = source_data[source_index];
@@ -519,6 +542,7 @@ bool VariantFunctions::CastVARIANTToJSON(Vector &source, Vector &result, idx_t c
 		result_data[i] = StringVector::AddString(result, res);
 		free(json_data);
 	}
+	yyjson_mut_doc_free(doc);
 
 	if (source.GetVectorType() == VectorType::CONSTANT_VECTOR) {
 		result.SetVectorType(VectorType::CONSTANT_VECTOR);

@@ -38,3 +38,17 @@ query I
 select '{"hello": [1,2,true, false, null], "test": [1, {"test": false}, ["blob", "this is a long string", 123]]}'::JSON::VARIANT::JSON;
 ----
 {"hello":[1,2,true,false,null],"test":[1,{"test":false},["blob","this is a long string",123]]}
+
+query I
+select '{"hello": [1,2,true, false, null], "test": [1, {"test": false}, ["blob", "this is a long string", 123]]}'::JSON::VARIANT::JSON from range(10);
+----
+{"hello":[1,2,true,false,null],"test":[1,{"test":false},["blob","this is a long string",123]]}
+{"hello":[1,2,true,false,null],"test":[1,{"test":false},["blob","this is a long string",123]]}
+{"hello":[1,2,true,false,null],"test":[1,{"test":false},["blob","this is a long string",123]]}
+{"hello":[1,2,true,false,null],"test":[1,{"test":false},["blob","this is a long string",123]]}
+{"hello":[1,2,true,false,null],"test":[1,{"test":false},["blob","this is a long string",123]]}
+{"hello":[1,2,true,false,null],"test":[1,{"test":false},["blob","this is a long string",123]]}
+{"hello":[1,2,true,false,null],"test":[1,{"test":false},["blob","this is a long string",123]]}
+{"hello":[1,2,true,false,null],"test":[1,{"test":false},["blob","this is a long string",123]]}
+{"hello":[1,2,true,false,null],"test":[1,{"test":false},["blob","this is a long string",123]]}
+{"hello":[1,2,true,false,null],"test":[1,{"test":false},["blob","this is a long string",123]]}
