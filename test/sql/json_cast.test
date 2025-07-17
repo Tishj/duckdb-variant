@@ -5,6 +5,8 @@ require json
 
 require variant
 
+# ---------- JSON -> VARIANT ----------
+
 query I
 select '"test"'::JSON::VARIANT;
 ----
@@ -20,26 +22,7 @@ select '{"hello": [1,2,true, false, null], "test": [1, {"test": false}, ["blob",
 ----
 {'keys': [hello, test, test], 'key_ids': [0, 1, 2], 'children': [1, 7, 2, 3, 4, 5, 6, 8, 9, 11, 10, 12, 13, 14], 'values': [{'type_id': 26, 'byte_offset': 0}, {'type_id': 27, 'byte_offset': 12}, {'type_id': 11, 'byte_offset': 20}, {'type_id': 11, 'byte_offset': 28}, {'type_id': 1, 'byte_offset': 36}, {'type_id': 2, 'byte_offset': 36}, {'type_id': 0, 'byte_offset': 36}, {'type_id': 27, 'byte_offset': 36}, {'type_id': 11, 'byte_offset': 44}, {'type_id': 26, 'byte_offset': 52}, {'type_id': 2, 'byte_offset': 64}, {'type_id': 27, 'byte_offset': 64}, {'type_id': 16, 'byte_offset': 72}, {'type_id': 16, 'byte_offset': 80}, {'type_id': 11, 'byte_offset': 105}], 'data': '\\x02\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x05\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x03\\x00\\x00\\x00\\x07\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x01\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x0A\\x00\\x00\\x00\\x03\\x00\\x00\\x00\\x0B\\x00\\x00\\x00\\x04\\x00\\x00\\x00blob\\x15\\x00\\x00\\x00this is a long string{\\x00\\x00\\x00\\x00\\x00\\x00\\x00'}
 
-#{
-#	"hello": [
-#		1,
-#		2,
-#		true,
-#		false,
-#		null
-#	],
-#	"test": [
-#		1,
-#		{
-#			"test": false
-#		},
-#		[
-#			"blob",
-#			"this is a long string",
-#			123
-#		]
-#	]
-#}
+# ---------- VARIANT -> JSON ----------
 
 query I
 select '"test"'::JSON::VARIANT::JSON;
