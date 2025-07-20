@@ -140,7 +140,7 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 	auto &type = source.GetType();
 	auto physical_type = type.InternalType();
 	auto blob_offset_data = OffsetData::GetBlob(offsets);
-	auto values_offset_data = OffsetData::GetChildren(offsets);
+	auto values_offset_data = OffsetData::GetValues(offsets);
 
 	//! value
 	auto &blob = VariantVector::GetValue(result);
@@ -167,7 +167,7 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 
 	//! byte_offset
 	auto &byte_offset = VariantVector::GetValuesByteOffset(result);
-	auto byte_offset_data = FlatVector::GetData<uint8_t>(byte_offset);
+	auto byte_offset_data = FlatVector::GetData<uint32_t>(byte_offset);
 
 	//! key_id
 	auto &key_id = VariantVector::GetChildrenKeyId(result);
@@ -349,6 +349,14 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 			auto &blob_offset = blob_offset_data[result_index];
 			auto &values_list_entry = values_data[result_index];
 
+			//! values
+			if (WRITE_DATA) {
+				//! type_id + byte_offset
+				auto values_offset = values_list_entry.offset + values_offset_data[result_index];
+				type_ids_data[values_offset] = static_cast<uint8_t>(type.id());
+				byte_offset_data[values_offset] = blob_offset;
+			}
+
 			//! value
 			auto str_size = val.GetSize();
 			auto str_length_varint_size = GetVarintSize(str_size);
@@ -361,13 +369,6 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 			}
 			blob_offset += str_length_varint_size + str_size;
 
-			//! values
-			if (WRITE_DATA) {
-				//! type_id + byte_offset
-				auto values_offset = values_list_entry.offset + values_offset_data[result_index];
-				type_ids_data[values_offset] = static_cast<uint8_t>(type.id());
-				byte_offset_data[values_offset] = blob_offset;
-			}
 			values_offset_data[result_index]++;
 		}
 	} else {
@@ -398,8 +399,6 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 				return ConvertPrimitiveToVariant<WRITE_DATA, float>(source, result, offsets, count, selvec);
 			case PhysicalType::DOUBLE:
 				return ConvertPrimitiveToVariant<WRITE_DATA, double>(source, result, offsets, count, selvec);
-			case PhysicalType::VARCHAR:
-				return ConvertPrimitiveToVariant<WRITE_DATA, string_t>(source, result, offsets, count, selvec);
 			case PhysicalType::INTERVAL:
 				return ConvertPrimitiveToVariant<WRITE_DATA, interval_t>(source, result, offsets, count, selvec);
 			default:
@@ -487,6 +486,7 @@ bool VariantFunctions::CastToVARIANT(Vector &source, Vector &result, idx_t count
 		LogicalType::UINTEGER,
 		LogicalType::UINTEGER
 	}, count);
+	offsets.SetCardinality(count);
 
 	//! Initialize the dictionary
 	StringDictionary dictionary;
@@ -511,7 +511,12 @@ bool VariantFunctions::CastToVARIANT(Vector &source, Vector &result, idx_t count
 
 	//! Second pass - actually construct the variants
 	InitializeOffsets(offsets, count);
-	return ConvertToVariant<true>(source, result, offsets, count, nullptr, keys_selvec, dictionary);
+	ConvertToVariant<true>(source, result, offsets, count, nullptr, keys_selvec, dictionary);
+
+	if (source.GetVectorType() == VectorType::CONSTANT_VECTOR) {
+		result.SetVectorType(VectorType::CONSTANT_VECTOR);
+	}
+	return true;
 }
 
 } // namespace duckdb

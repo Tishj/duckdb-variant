@@ -33,6 +33,18 @@ static LogicalType CreateVariantType() {
 	return res;
 }
 
+static void ToVariantFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+    auto &input = args.data[0];
+    CastParameters parameters;
+    VariantFunctions::CastToVARIANT(input, result, args.size(), parameters);
+}
+
+static unique_ptr<FunctionData> ToVariantBind(ClientContext &context, ScalarFunction &bound_function,
+                                              vector<unique_ptr<Expression>> &arguments) {
+    bound_function.return_type = CreateVariantType();
+    return nullptr;
+}
+
 static void LoadInternal(DatabaseInstance &instance) {
 	// add the "variant" type
 	auto variant_type = CreateVariantType();
@@ -43,7 +55,9 @@ static void LoadInternal(DatabaseInstance &instance) {
 	                                    VariantFunctions::CastJSONToVARIANT);
 	ExtensionUtil::RegisterCastFunction(instance, variant_type, LogicalType::JSON(),
 	                                    VariantFunctions::CastVARIANTToJSON);
-	ExtensionUtil::RegisterCastFunction(instance, LogicalType::ANY, variant_type, VariantFunctions::CastToVARIANT);
+    ScalarFunction to_variant_func("to_variant", {LogicalType::ANY}, variant_type, ToVariantFunction);
+    to_variant_func.bind = ToVariantBind;
+    ExtensionUtil::RegisterFunction(instance, to_variant_func);
 }
 
 void VariantExtension::Load(DuckDB &db) {
