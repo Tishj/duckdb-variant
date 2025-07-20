@@ -86,7 +86,7 @@ public:
 	//! Record the relationship between index in the 'keys' (child) and the index in the dictionary
 	SelectionVector sel_vec;
 	idx_t sel_vec_capacity = 0;
-	//! Unsure uniqueness of the dictionary entries
+	//! Ensure uniqueness of the dictionary entries
 	string_map_t<idx_t> dictionary;
 	idx_t dictionary_capacity = STANDARD_VECTOR_SIZE;
 
