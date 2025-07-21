@@ -78,9 +78,82 @@ public:
 
 } // namespace
 
+VariantLogicalType LogicalTypeToVariant(LogicalTypeId type) {
+	switch (type) {
+	case LogicalTypeId::BOOLEAN: {
+		//! This won't be used directly anyway
+		return VariantLogicalType::BOOL_TRUE;
+	}
+	case LogicalTypeId::TINYINT:
+		return VariantLogicalType::INT8;
+	case LogicalTypeId::UTINYINT:
+		return VariantLogicalType::UINT8;
+	case LogicalTypeId::SMALLINT:
+		return VariantLogicalType::INT16;
+	case LogicalTypeId::USMALLINT:
+		return VariantLogicalType::UINT16;
+	case LogicalTypeId::SQLNULL:
+		return VariantLogicalType::VARIANT_NULL;
+	case LogicalTypeId::DATE:
+		return VariantLogicalType::DATE;
+	case LogicalTypeId::INTEGER:
+		return VariantLogicalType::INT32;
+	case LogicalTypeId::UINTEGER:
+		return VariantLogicalType::UINT32;
+	case LogicalTypeId::BIGINT:
+		return VariantLogicalType::INT64;
+	case LogicalTypeId::TIME:
+		return VariantLogicalType::TIME;
+	case LogicalTypeId::TIMESTAMP:
+		return VariantLogicalType::TIMESTAMP_MICROS;
+	case LogicalTypeId::TIMESTAMP_SEC:
+		return VariantLogicalType::TIMESTAMP_SEC;
+	case LogicalTypeId::TIMESTAMP_NS:
+		return VariantLogicalType::TIMESTAMP_NANOS;
+	case LogicalTypeId::TIMESTAMP_MS:
+		return VariantLogicalType::TIMESTAMP_MILIS;
+	case LogicalTypeId::TIME_TZ:
+		return VariantLogicalType::TIME_TZ;
+	case LogicalTypeId::TIMESTAMP_TZ:
+		return VariantLogicalType::TIMESTAMP_MICROS_TZ;
+	case LogicalTypeId::UBIGINT:
+		return VariantLogicalType::UINT64;
+	case LogicalTypeId::UHUGEINT:
+		return VariantLogicalType::UINT128;
+	case LogicalTypeId::HUGEINT:
+		return VariantLogicalType::INT128;
+	case LogicalTypeId::UUID:
+		return VariantLogicalType::UUID;
+	case LogicalTypeId::FLOAT:
+		return VariantLogicalType::FLOAT;
+	case LogicalTypeId::DOUBLE:
+		return VariantLogicalType::DOUBLE;
+	case LogicalTypeId::DECIMAL:
+		return VariantLogicalType::DECIMAL;
+	case LogicalTypeId::VARCHAR:
+		return VariantLogicalType::VARCHAR;
+	case LogicalTypeId::BLOB:
+		return VariantLogicalType::BLOB;
+	case LogicalTypeId::INTERVAL:
+		return VariantLogicalType::INTERVAL;
+	default:
+		throw NotImplementedException("Can't map from LogicalTypeId (%s) to VariantLogicalType", EnumUtil::ToString(type));
+	}
+}
+
+static VariantLogicalType GetTypeId(bool val, const VariantLogicalType ) {
+	return val ? VariantLogicalType::BOOL_TRUE : VariantLogicalType::BOOL_FALSE;
+}
+
+template <typename T>
+static VariantLogicalType GetTypeId(T val, const VariantLogicalType type) {
+	return type;
+}
+
 template <bool WRITE_DATA, class T, bool IS_BOOL = false>
 static bool ConvertPrimitiveToVariant(Vector &source, Vector &result, DataChunk &offsets, idx_t count, SelectionVector *selvec, SelectionVector *value_ids_selvec) {
 	const auto &type = source.GetType();
+	auto variant_type = LogicalTypeToVariant(type.id());
 
 	auto blob_offset_data = OffsetData::GetBlob(offsets);
 	auto values_offset_data = OffsetData::GetChildren(offsets);
@@ -115,30 +188,25 @@ static bool ConvertPrimitiveToVariant(Vector &source, Vector &result, DataChunk 
 		auto &blob_offset = blob_offset_data[result_index];
 		auto &values_list_entry = values_data[result_index];
 
-		auto val = source_data[index];
-
-		//! value
 		if (WRITE_DATA) {
+			auto val = source_data[index];
+
 			auto &blob_value = blob_data[result_index];
 			auto blob_value_data = data_ptr_cast(blob_value.GetDataWriteable());
-			Store(val, blob_value_data + blob_offset);
-		}
-		blob_offset += sizeof(T);
 
-		//! values
-		if (WRITE_DATA) {
-			//! type_id + byte_offset
 			auto values_offset = values_list_entry.offset + values_offset_data[result_index];
-			if (IS_BOOL) {
-				type_ids_data[values_offset] = static_cast<uint8_t>(type.id());
-			} else {
-				type_ids_data[values_offset] = static_cast<uint8_t>(type.id());
+			type_ids_data[values_offset] = static_cast<uint8_t>(GetTypeId(val, variant_type));
+			if (!IS_BOOL) {
+				Store(val, blob_value_data + blob_offset);
 			}
 			byte_offset_data[values_offset] = blob_offset;
 			if (value_ids_selvec) {
 				//! Set for the parent where this child lives in the 'values' list
 				value_id_data[value_ids_selvec->get_index(i)] = values_offset;
 			}
+		}
+		if (!IS_BOOL) {
+			blob_offset += sizeof(T);
 		}
 		values_offset_data[result_index]++;
 	}
@@ -162,6 +230,7 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 	}
 
 	auto physical_type = type.InternalType();
+	auto logical_type = type.id();
 	auto blob_offset_data = OffsetData::GetBlob(offsets);
 	auto values_offset_data = OffsetData::GetValues(offsets);
 
@@ -177,12 +246,9 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 	auto &children = VariantVector::GetChildren(result);
 	auto children_data = ListVector::GetData(children);
 
-	////! keys
-	//auto &keys = VariantVector::GetKeys(result);
-	//auto keys_data = ListVector::GetData(keys);
-
-	////! keys_entry
-	//auto &keys_entry = ListVector::GetEntry(keys);
+	//! keys
+	auto &keys = VariantVector::GetKeys(result);
+	auto keys_data = ListVector::GetData(keys);
 
 	//! type_ids
 	auto &type_ids = VariantVector::GetValuesTypeId(result);
@@ -206,26 +272,9 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 	if (type.IsNested()) {
 		auto keys_offset_data = OffsetData::GetKeys(offsets);
 		auto children_offset_data = OffsetData::GetChildren(offsets);
+		//! FIXME: use logical type instead
 		if (physical_type == PhysicalType::LIST) {
 			auto source_data = source_format.GetData<list_entry_t>(source_format);
-
-			//! Keep track of the indices where children of the list's values are stored 
-			Vector child_offset(LogicalType::UINTEGER, offsets.size());
-			auto child_offset_data = FlatVector::GetData<uint32_t>(child_offset);
-
-			if (WRITE_DATA) {
-				//! Initialize the child offsets to the current values offsets
-				for (idx_t i = 0; i < offsets.size(); i++) {
-					child_offset_data[i] = values_offset_data[i];
-				}
-				//! Offset this by the lists of the row, the values will be written after them
-				//! For example: [[1,2,3],[4,5,6],[7,8]]
-				//! Is stored in the 'values' list as: LLLEEEEEEEE
-				//! Where L represents a LIST, and E represents an element
-				for (idx_t i = 0; i < count; i++) {
-					child_offset_data[selvec ? selvec->get_index(i) : i]++;
-				}
-			}
 
 			//! Create a selection vector that maps to the right row in the 'result' for the child vector
 			auto list_size = ListVector::GetListSize(source);
@@ -244,7 +293,7 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 				if (WRITE_DATA) {
 					//! type_id + byte_offset
 					auto values_offset = values_list_entry.offset + values_offset_data[result_index];
-					type_ids_data[values_offset] = static_cast<uint8_t>(type.id());
+					type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::ARRAY);
 					byte_offset_data[values_offset] = blob_offset;
 					if (value_ids_selvec) {
 						//! Set for the parent where this child lives in the 'values' list
@@ -271,20 +320,12 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 					new_selection.set_index(child_idx + entry.offset, result_index);
 					if (WRITE_DATA) {
 						children_selection.set_index(child_idx + entry.offset, children_offset + child_idx);
-					}
-
-					// Write the value indices for the children
-					if (WRITE_DATA) {
-						//! value_id
 						key_id_validity.SetInvalid(children_offset + child_idx);
 					}
 				}
 
 				//! children
 				children_offset_data[result_index] += entry.length;
-				if (WRITE_DATA) {
-					child_offset_data[result_index] += entry.length;
-				}
 			}
 			//! Now write the child vector of the list (for all rows)
 			auto &entry = ListVector::GetEntry(source);
@@ -303,20 +344,6 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 				}
 			}
 
-			//! Keep track of the indices where children of the list's values are stored 
-			Vector child_offset(LogicalType::UINTEGER, offsets.size());
-			auto child_offset_data = FlatVector::GetData<uint32_t>(child_offset);
-
-			if (WRITE_DATA) {
-				//! Initialize the child offsets to the current values offsets
-				for (idx_t i = 0; i < offsets.size(); i++) {
-					child_offset_data[i] = values_offset_data[i];
-				}
-				for (idx_t i = 0; i < count; i++) {
-					child_offset_data[selvec ? selvec->get_index(i) : i]++;
-				}
-			}
-
 			SelectionVector children_selection(0, count);
 			for (idx_t i = 0; i < count; i++) {
 				auto result_index = selvec ? selvec->get_index(i) : i;
@@ -324,13 +351,13 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 				auto &blob_offset = blob_offset_data[result_index];
 				auto &values_list_entry = values_data[result_index];
 				auto &children_list_entry = children_data[result_index];
-				//auto &keys_list_entry = keys_data[result_index];
+				auto &keys_list_entry = keys_data[result_index];
 
 				//! values
 				if (WRITE_DATA) {
 					//! type_id + byte_offset
 					auto values_offset = values_list_entry.offset + values_offset_data[result_index];
-					type_ids_data[values_offset] = static_cast<uint8_t>(type.id());
+					type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::OBJECT);
 					byte_offset_data[values_offset] = blob_offset;
 					if (value_ids_selvec) {
 						//! Set for the parent where this child lives in the 'values' list
@@ -354,9 +381,10 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 				//! children
 				if (WRITE_DATA) {
 					auto children_offset = children_list_entry.offset + children_offset_data[result_index];
+					auto keys_offset = keys_list_entry.offset + keys_offset_data[result_index];
 					for (idx_t child_idx = 0; child_idx < children.size(); child_idx++) {
 						key_id_data[children_offset + child_idx] = keys_offset_data[result_index] + child_idx;
-						keys_selvec.set_index(keys_offset_data[result_index] + child_idx, dictionary_indices[child_idx]);
+						keys_selvec.set_index(keys_offset + child_idx, dictionary_indices[child_idx]);
 					}
 					//! Map from index of the child to the children.value_ids of the parent
 					children_selection.set_index(i, children_offset);
@@ -364,10 +392,6 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 
 				children_offset_data[result_index] += children.size();
 				keys_offset_data[result_index] += children.size();
-
-				if (WRITE_DATA) {
-					child_offset_data[result_index] += children.size();
-				}
 			}
 
 			for (auto &child_ptr : children) {
@@ -398,7 +422,7 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 			if (WRITE_DATA) {
 				//! type_id + byte_offset
 				auto values_offset = values_list_entry.offset + values_offset_data[result_index];
-				type_ids_data[values_offset] = static_cast<uint8_t>(type.id());
+				type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::VARCHAR);
 				byte_offset_data[values_offset] = blob_offset;
 				if (value_ids_selvec) {
 					//! Set for the parent where this child lives in the 'values' list
@@ -421,35 +445,36 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 			values_offset_data[result_index]++;
 		}
 	} else {
+		//! FIXME: use logical type instead
 		switch (physical_type) {
 			case PhysicalType::BOOL:
-				return ConvertPrimitiveToVariant<WRITE_DATA, bool>(source, result, offsets, count, selvec, value_ids_selvec);
+				return ConvertPrimitiveToVariant<WRITE_DATA, bool, true>(source, result, offsets, count, selvec, value_ids_selvec);
 			case PhysicalType::INT8:
-				return ConvertPrimitiveToVariant<WRITE_DATA, int8_t>(source, result, offsets, count, selvec, value_ids_selvec);
+				return ConvertPrimitiveToVariant<WRITE_DATA, int8_t, false>(source, result, offsets, count, selvec, value_ids_selvec);
 			case PhysicalType::INT16:
-				return ConvertPrimitiveToVariant<WRITE_DATA, int16_t>(source, result, offsets, count, selvec, value_ids_selvec);
+				return ConvertPrimitiveToVariant<WRITE_DATA, int16_t, false>(source, result, offsets, count, selvec, value_ids_selvec);
 			case PhysicalType::INT32:
-				return ConvertPrimitiveToVariant<WRITE_DATA, int32_t>(source, result, offsets, count, selvec, value_ids_selvec);
+				return ConvertPrimitiveToVariant<WRITE_DATA, int32_t, false>(source, result, offsets, count, selvec, value_ids_selvec);
 			case PhysicalType::INT64:
-				return ConvertPrimitiveToVariant<WRITE_DATA, int64_t>(source, result, offsets, count, selvec, value_ids_selvec);
+				return ConvertPrimitiveToVariant<WRITE_DATA, int64_t, false>(source, result, offsets, count, selvec, value_ids_selvec);
 			case PhysicalType::UINT8:
-				return ConvertPrimitiveToVariant<WRITE_DATA, uint8_t>(source, result, offsets, count, selvec, value_ids_selvec);
+				return ConvertPrimitiveToVariant<WRITE_DATA, uint8_t, false>(source, result, offsets, count, selvec, value_ids_selvec);
 			case PhysicalType::UINT16:
-				return ConvertPrimitiveToVariant<WRITE_DATA, uint16_t>(source, result, offsets, count, selvec, value_ids_selvec);
+				return ConvertPrimitiveToVariant<WRITE_DATA, uint16_t, false>(source, result, offsets, count, selvec, value_ids_selvec);
 			case PhysicalType::UINT32:
-				return ConvertPrimitiveToVariant<WRITE_DATA, uint32_t>(source, result, offsets, count, selvec, value_ids_selvec);
+				return ConvertPrimitiveToVariant<WRITE_DATA, uint32_t, false>(source, result, offsets, count, selvec, value_ids_selvec);
 			case PhysicalType::UINT64:
-				return ConvertPrimitiveToVariant<WRITE_DATA, uint64_t>(source, result, offsets, count, selvec, value_ids_selvec);
+				return ConvertPrimitiveToVariant<WRITE_DATA, uint64_t, false>(source, result, offsets, count, selvec, value_ids_selvec);
 			case PhysicalType::INT128:
-				return ConvertPrimitiveToVariant<WRITE_DATA, hugeint_t>(source, result, offsets, count, selvec, value_ids_selvec);
+				return ConvertPrimitiveToVariant<WRITE_DATA, hugeint_t, false>(source, result, offsets, count, selvec, value_ids_selvec);
 			case PhysicalType::UINT128:
-				return ConvertPrimitiveToVariant<WRITE_DATA, uhugeint_t>(source, result, offsets, count, selvec, value_ids_selvec);
+				return ConvertPrimitiveToVariant<WRITE_DATA, uhugeint_t, false>(source, result, offsets, count, selvec, value_ids_selvec);
 			case PhysicalType::FLOAT:
-				return ConvertPrimitiveToVariant<WRITE_DATA, float>(source, result, offsets, count, selvec, value_ids_selvec);
+				return ConvertPrimitiveToVariant<WRITE_DATA, float, false>(source, result, offsets, count, selvec, value_ids_selvec);
 			case PhysicalType::DOUBLE:
-				return ConvertPrimitiveToVariant<WRITE_DATA, double>(source, result, offsets, count, selvec, value_ids_selvec);
+				return ConvertPrimitiveToVariant<WRITE_DATA, double, false>(source, result, offsets, count, selvec, value_ids_selvec);
 			case PhysicalType::INTERVAL:
-				return ConvertPrimitiveToVariant<WRITE_DATA, interval_t>(source, result, offsets, count, selvec, value_ids_selvec);
+				return ConvertPrimitiveToVariant<WRITE_DATA, interval_t, false>(source, result, offsets, count, selvec, value_ids_selvec);
 			default:
 				throw InternalException("Invalid PhysicalType for ConvertToVariant");
 		}
