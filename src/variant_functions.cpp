@@ -508,6 +508,11 @@ yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat
 		auto val = Load<double>(ptr);
 		return yyjson_mut_real(doc, val);
 	}
+	case VariantLogicalType::DATE: {
+		auto val = Load<int32_t>(ptr);
+		auto val_str = Date::ToString(date_t(val));
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
 	case VariantLogicalType::VARCHAR: {
 		auto string_length = VarintDecode<uint32_t>(ptr);
 		auto string_data = reinterpret_cast<const char *>(ptr);

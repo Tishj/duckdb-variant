@@ -79,7 +79,8 @@ public:
 
 struct VariantVectorData {
 public:
-	explicit VariantVectorData(Vector &variant) : key_id_validity(FlatVector::Validity(VariantVector::GetChildrenKeyId(variant))) {
+	explicit VariantVectorData(Vector &variant)
+	    : key_id_validity(FlatVector::Validity(VariantVector::GetChildrenKeyId(variant))) {
 		blob_data = FlatVector::GetData<string_t>(VariantVector::GetValue(variant));
 		type_ids_data = FlatVector::GetData<uint8_t>(VariantVector::GetValuesTypeId(variant));
 		byte_offset_data = FlatVector::GetData<uint32_t>(VariantVector::GetValuesByteOffset(variant));
@@ -89,6 +90,7 @@ public:
 		children_data = FlatVector::GetData<list_entry_t>(VariantVector::GetChildren(variant));
 		keys_data = FlatVector::GetData<list_entry_t>(VariantVector::GetKeys(variant));
 	}
+
 public:
 	//! value
 	string_t *blob_data;
@@ -237,8 +239,8 @@ static bool ConvertPrimitiveToVariant(Vector &source, VariantVectorData &result,
 //! * @param value_ids_selvec The selection vector from i (< count) to the index in the children.value_ids selvec, to
 //! populate the parent's children
 template <bool WRITE_DATA>
-static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChunk &offsets, idx_t count, SelectionVector *selvec,
-                             SelectionVector &keys_selvec, StringDictionary &dictionary,
+static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChunk &offsets, idx_t count,
+                             SelectionVector *selvec, SelectionVector &keys_selvec, StringDictionary &dictionary,
                              SelectionVector *value_ids_selvec) {
 	auto &type = source.GetType();
 
@@ -285,7 +287,8 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 
 				//! value
 				const auto length_varint_size = GetVarintSize(entry.length);
-				const auto child_offset_varint_size = length_varint_size ? GetVarintSize(children_offset_data[result_index]) : 0;
+				const auto child_offset_varint_size =
+				    length_varint_size ? GetVarintSize(children_offset_data[result_index]) : 0;
 				if (WRITE_DATA) {
 					auto &blob_value = result.blob_data[result_index];
 					auto blob_value_data = data_ptr_cast(blob_value.GetDataWriteable());
@@ -293,7 +296,7 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 					VarintEncode(entry.length, blob_value_data + blob_offset);
 					if (entry.length) {
 						VarintEncode(children_offset_data[result_index],
-									blob_value_data + blob_offset + length_varint_size);
+						             blob_value_data + blob_offset + length_varint_size);
 					}
 				}
 				blob_offset += length_varint_size + child_offset_varint_size;
@@ -576,18 +579,23 @@ bool VariantFunctions::CastToVARIANT(Vector &source, Vector &result, idx_t count
 	});
 	SelectionVector keys_selvec;
 
-	VariantVectorData result_data(result);
+	{
+		VariantVectorData result_data(result);
+		//! First pass - collect sizes/offsets
+		InitializeOffsets(offsets, count);
+		ConvertToVariant<false>(source, result_data, offsets, count, nullptr, keys_selvec, dictionary, nullptr);
+	}
 
-	//! First pass - collect sizes/offsets
-	InitializeOffsets(offsets, count);
-	ConvertToVariant<false>(source, result_data, offsets, count, nullptr, keys_selvec, dictionary, nullptr);
-
+	//! This resizes the lists, invalidating the "GetData" results stored in VariantVectorData
 	idx_t keys_selvec_size;
 	InitializeVariants(offsets, result, keys_selvec, keys_selvec_size);
 
-	//! Second pass - actually construct the variants
-	InitializeOffsets(offsets, count);
-	ConvertToVariant<true>(source, result_data, offsets, count, nullptr, keys_selvec, dictionary, nullptr);
+	{
+		VariantVectorData result_data(result);
+		//! Second pass - actually construct the variants
+		InitializeOffsets(offsets, count);
+		ConvertToVariant<true>(source, result_data, offsets, count, nullptr, keys_selvec, dictionary, nullptr);
+	}
 
 	keys_entry.Slice(keys_selvec, keys_selvec_size);
 
