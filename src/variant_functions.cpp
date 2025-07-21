@@ -251,13 +251,13 @@ static optional_idx ConvertJSON(yyjson_val *val, Vector &result, VariantConversi
 	}
 	case YYJSON_TYPE_NUM | YYJSON_SUBTYPE_UINT: {
 		auto value = unsafe_yyjson_get_uint(val);
-		VarintEncode(value, state.stream);
+		state.stream.WriteData(const_data_ptr_cast(&value), sizeof(uint64_t));
 		type_ids_data[index] = static_cast<uint8_t>(VariantLogicalType::UINT64);
 		break;
 	}
 	case YYJSON_TYPE_NUM | YYJSON_SUBTYPE_SINT: {
 		auto value = unsafe_yyjson_get_sint(val);
-		VarintEncode(value, state.stream);
+		state.stream.WriteData(const_data_ptr_cast(&value), sizeof(int64_t));
 		type_ids_data[index] = static_cast<uint8_t>(VariantLogicalType::INT64);
 		break;
 	}
@@ -472,12 +472,36 @@ yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat
 		return yyjson_mut_true(doc);
 	case VariantLogicalType::BOOL_FALSE:
 		return yyjson_mut_false(doc);
+	case VariantLogicalType::INT8: {
+		auto val = Load<int8_t>(ptr);
+		return yyjson_mut_sint(doc, val);
+	}
+	case VariantLogicalType::INT16: {
+		auto val = Load<int16_t>(ptr);
+		return yyjson_mut_sint(doc, val);
+	}
+	case VariantLogicalType::INT32: {
+		auto val = Load<int32_t>(ptr);
+		return yyjson_mut_sint(doc, val);
+	}
 	case VariantLogicalType::INT64: {
-		auto val = VarintDecode<int64_t>(ptr);
+		auto val = Load<int64_t>(ptr);
+		return yyjson_mut_sint(doc, val);
+	}
+	case VariantLogicalType::UINT8: {
+		auto val = Load<uint8_t>(ptr);
+		return yyjson_mut_sint(doc, val);
+	}
+	case VariantLogicalType::UINT16: {
+		auto val = Load<uint16_t>(ptr);
+		return yyjson_mut_sint(doc, val);
+	}
+	case VariantLogicalType::UINT32: {
+		auto val = Load<uint32_t>(ptr);
 		return yyjson_mut_sint(doc, val);
 	}
 	case VariantLogicalType::UINT64: {
-		auto val = VarintDecode<uint64_t>(ptr);
+		auto val = Load<uint64_t>(ptr);
 		return yyjson_mut_uint(doc, val);
 	}
 	case VariantLogicalType::DOUBLE: {
