@@ -2,6 +2,7 @@
 #include "variant_extension.hpp"
 #include "duckdb/common/type_visitor.hpp"
 #include "duckdb/common/string_map_set.hpp"
+#include "duckdb/common/printer.hpp"
 
 namespace duckdb {
 
@@ -98,7 +99,7 @@ static bool ConvertPrimitiveToVariant(Vector &source, Vector &result, DataChunk 
 
 	//! byte_offset
 	auto &byte_offset = VariantVector::GetValuesByteOffset(result);
-	auto byte_offset_data = FlatVector::GetData<uint8_t>(byte_offset);
+	auto byte_offset_data = FlatVector::GetData<uint32_t>(byte_offset);
 
 	UnifiedVectorFormat source_format;
 	source.ToUnifiedFormat(count, source_format);
@@ -138,6 +139,11 @@ static bool ConvertPrimitiveToVariant(Vector &source, Vector &result, DataChunk 
 template <bool WRITE_DATA>
 static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets, idx_t count, SelectionVector *selvec, SelectionVector &keys_selvec, StringDictionary &dictionary) {
 	auto &type = source.GetType();
+
+	if (WRITE_DATA) {
+		Printer::PrintF("Type: %s | Count: %d", type.ToString(), count);
+	}
+
 	auto physical_type = type.InternalType();
 	auto blob_offset_data = OffsetData::GetBlob(offsets);
 	auto values_offset_data = OffsetData::GetValues(offsets);
@@ -172,6 +178,7 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 	//! key_id
 	auto &key_id = VariantVector::GetChildrenKeyId(result);
 	auto key_id_data = FlatVector::GetData<uint32_t>(key_id);
+	auto &key_id_validity = FlatVector::Validity(key_id);
 
 	//! value_id
 	auto &value_id = VariantVector::GetChildrenValueId(result);
@@ -245,6 +252,7 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 					if (WRITE_DATA) {
 						//! value_id
 						value_id_data[children_offset + child_idx] = child_offset_data[result_index] + child_idx;
+						key_id_validity.SetInvalid(children_offset + child_idx);
 					}
 				}
 
@@ -339,7 +347,6 @@ static bool ConvertToVariant(Vector &source, Vector &result, DataChunk &offsets,
 			throw NotImplementedException("Can't convert nested physical type '%s'", EnumUtil::ToString(physical_type));
 		}
 	} else if (physical_type == PhysicalType::VARCHAR) {
-		//! TODO: Implement WRITE_DATA for strings
 		auto source_data = source_format.GetData<string_t>(source_format);
 		for (idx_t i = 0; i < count; i++) {
 			auto index = source_format.sel->get_index(i);
@@ -421,7 +428,7 @@ static void InitializeOffsets(DataChunk &offsets, idx_t count) {
 	}
 }
 
-static void InitializeVariants(DataChunk &offsets, Vector &result, SelectionVector &keys_selvec) {
+static void InitializeVariants(DataChunk &offsets, Vector &result, SelectionVector &keys_selvec, idx_t &selvec_size) {
 	auto &keys = VariantVector::GetKeys(result);
 	auto keys_data = ListVector::GetData(keys);
 
@@ -476,6 +483,7 @@ static void InitializeVariants(DataChunk &offsets, Vector &result, SelectionVect
 	ListVector::SetListSize(values, values_offset);
 
 	keys_selvec.Initialize(keys_offset);
+	selvec_size = keys_offset;
 }
 
 bool VariantFunctions::CastToVARIANT(Vector &source, Vector &result, idx_t count, CastParameters &parameters) {
@@ -507,11 +515,14 @@ bool VariantFunctions::CastToVARIANT(Vector &source, Vector &result, idx_t count
 	InitializeOffsets(offsets, count);
 	ConvertToVariant<false>(source, result, offsets, count, nullptr, keys_selvec, dictionary);
 
-	InitializeVariants(offsets, result, keys_selvec);
+	idx_t keys_selvec_size;
+	InitializeVariants(offsets, result, keys_selvec, keys_selvec_size);
 
 	//! Second pass - actually construct the variants
 	InitializeOffsets(offsets, count);
 	ConvertToVariant<true>(source, result, offsets, count, nullptr, keys_selvec, dictionary);
+
+	keys_entry.Slice(keys_selvec, keys_selvec_size);
 
 	if (source.GetVectorType() == VectorType::CONSTANT_VECTOR) {
 		result.SetVectorType(VectorType::CONSTANT_VECTOR);
