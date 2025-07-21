@@ -36,3 +36,19 @@ select to_variant({'test': 123, 'hello': [1,2,3], 'world': {'test': true}})::JSO
 {"test":123,"hello":[1,2,3],"world":{"test":true}}
 {"test":123,"hello":[1,2,3],"world":{"test":true}}
 {"test":123,"hello":[1,2,3],"world":{"test":true}}
+
+statement ok
+create table tbl as select {'test': 123, 'hello': [1,2,3], 'world': {'test': true}} var;
+
+statement ok
+insert into tbl select {'test': 123, 'hello': [4,5,6], 'world': {'test': true}};
+
+statement ok
+insert into tbl select {'test': 123, 'hello': [], 'world': {'test': true}};
+
+query I
+select to_variant(var)::JSON from tbl;
+----
+{"test":123,"hello":[1,2,3],"world":{"test":true}}
+{"hello":123,"test":[4,5,6],"world":{"test":true}}
+{"test":123,"hello":[],"world":{"test":true}}
