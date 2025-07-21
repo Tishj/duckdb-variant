@@ -216,7 +216,7 @@ static bool ConvertPrimitiveToVariant(Vector &source, VariantVectorData &result,
 			result.byte_offset_data[values_offset] = blob_offset;
 			if (value_ids_selvec) {
 				//! Set for the parent where this child lives in the 'values' list
-				result.value_id_data[value_ids_selvec->get_index(i)] = values_offset;
+				result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
 			}
 		}
 		if (!IS_BOOL) {
@@ -278,21 +278,23 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 					result.byte_offset_data[values_offset] = blob_offset;
 					if (value_ids_selvec) {
 						//! Set for the parent where this child lives in the 'values' list
-						result.value_id_data[value_ids_selvec->get_index(i)] = values_offset;
+						result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
 					}
 				}
 				values_offset_data[result_index]++;
 
 				//! value
 				const auto length_varint_size = GetVarintSize(entry.length);
-				const auto child_offset_varint_size = GetVarintSize(children_offset_data[result_index]);
+				const auto child_offset_varint_size = length_varint_size ? GetVarintSize(children_offset_data[result_index]) : 0;
 				if (WRITE_DATA) {
 					auto &blob_value = result.blob_data[result_index];
 					auto blob_value_data = data_ptr_cast(blob_value.GetDataWriteable());
 
 					VarintEncode(entry.length, blob_value_data + blob_offset);
-					VarintEncode(children_offset_data[result_index],
-					             blob_value_data + blob_offset + length_varint_size);
+					if (entry.length) {
+						VarintEncode(children_offset_data[result_index],
+									blob_value_data + blob_offset + length_varint_size);
+					}
 				}
 				blob_offset += length_varint_size + child_offset_varint_size;
 
@@ -344,7 +346,7 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 					result.byte_offset_data[values_offset] = blob_offset;
 					if (value_ids_selvec) {
 						//! Set for the parent where this child lives in the 'values' list
-						result.value_id_data[value_ids_selvec->get_index(i)] = values_offset;
+						result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
 					}
 				}
 				values_offset_data[result_index]++;
@@ -411,7 +413,7 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 				result.byte_offset_data[values_offset] = blob_offset;
 				if (value_ids_selvec) {
 					//! Set for the parent where this child lives in the 'values' list
-					result.value_id_data[value_ids_selvec->get_index(i)] = values_offset;
+					result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
 				}
 			}
 
