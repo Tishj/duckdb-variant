@@ -185,7 +185,48 @@ static VariantLogicalType GetTypeId(T val, const VariantLogicalType type) {
 	return type;
 }
 
-template <bool WRITE_DATA, class T, bool IS_BOOL = false>
+template <typename T>
+static void WriteData(data_ptr_t ptr, const T &val, idx_t &length_size) {
+	Store(val, ptr);
+}
+
+// Specialization for bool
+template <>
+void WriteData(data_ptr_t ptr, const bool &val, idx_t &length_size) {
+	return;
+}
+
+// Specialization for string_t
+template <>
+void WriteData(data_ptr_t ptr, const string_t &val, idx_t &length_size) {
+	auto str_length = val.GetSize();
+	VarintEncode(str_length, ptr);
+	memcpy(ptr + length_size, val.GetData(), str_length);
+}
+
+// Generic version
+template <typename T>
+idx_t GetValueSize(const T &val, idx_t &length_size) {
+	length_size = 0;
+	return sizeof(T);
+}
+
+// Specialization for string_t
+template <>
+idx_t GetValueSize(const string_t &val, idx_t &length_size) {
+	auto value_size = val.GetSize();
+	length_size = GetVarintSize(value_size);
+	return value_size;
+}
+
+// Specialization for bool
+template <>
+idx_t GetValueSize(const bool &val, idx_t &length_size) {
+	length_size = 0;
+	return 0;
+}
+
+template <bool WRITE_DATA, class T>
 static bool ConvertPrimitiveToVariant(Vector &source, VariantVectorData &result, DataChunk &offsets, idx_t count,
                                       SelectionVector *selvec, SelectionVector *value_ids_selvec) {
 	const auto &type = source.GetType();
@@ -204,26 +245,25 @@ static bool ConvertPrimitiveToVariant(Vector &source, VariantVectorData &result,
 		auto &blob_offset = blob_offset_data[result_index];
 		auto &values_list_entry = result.values_data[result_index];
 
-		if (WRITE_DATA) {
-			auto val = source_data[index];
+		auto &val = source_data[index];
+		idx_t length_size = 0;
+		idx_t value_size = GetValueSize<T>(val, length_size);
 
+		if (WRITE_DATA) {
 			auto &blob_value = result.blob_data[result_index];
 			auto blob_value_data = data_ptr_cast(blob_value.GetDataWriteable());
 
 			auto values_offset = values_list_entry.offset + values_offset_data[result_index];
 			result.type_ids_data[values_offset] = static_cast<uint8_t>(GetTypeId(val, variant_type));
-			if (!IS_BOOL) {
-				Store(val, blob_value_data + blob_offset);
-			}
 			result.byte_offset_data[values_offset] = blob_offset;
 			if (value_ids_selvec) {
 				//! Set for the parent where this child lives in the 'values' list
 				result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
 			}
+			WriteData<T>(blob_value_data + blob_offset, val, length_size);
 		}
-		if (!IS_BOOL) {
-			blob_offset += sizeof(T);
-		}
+		blob_offset += length_size + value_size;
+
 		values_offset_data[result_index]++;
 	}
 	return true;
@@ -398,87 +438,54 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 		} else {
 			throw NotImplementedException("Can't convert nested physical type '%s'", EnumUtil::ToString(physical_type));
 		}
-	} else if (physical_type == PhysicalType::VARCHAR) {
-		auto source_data = source_format.GetData<string_t>(source_format);
-		for (idx_t i = 0; i < count; i++) {
-			auto index = source_format.sel->get_index(i);
-			auto &val = source_data[index];
-
-			auto result_index = selvec ? selvec->get_index(i) : i;
-			auto &blob_offset = blob_offset_data[result_index];
-			auto &values_list_entry = result.values_data[result_index];
-
-			//! values
-			if (WRITE_DATA) {
-				//! type_id + byte_offset
-				auto values_offset = values_list_entry.offset + values_offset_data[result_index];
-				result.type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::VARCHAR);
-				result.byte_offset_data[values_offset] = blob_offset;
-				if (value_ids_selvec) {
-					//! Set for the parent where this child lives in the 'values' list
-					result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
-				}
-			}
-
-			//! value
-			auto str_size = val.GetSize();
-			auto str_length_varint_size = GetVarintSize(str_size);
-			if (WRITE_DATA) {
-				auto &blob_value = result.blob_data[result_index];
-				auto blob_value_data = data_ptr_cast(blob_value.GetDataWriteable());
-
-				VarintEncode(str_size, blob_value_data + blob_offset);
-				memcpy(blob_value_data + blob_offset + str_length_varint_size, val.GetData(), str_size);
-			}
-			blob_offset += str_length_varint_size + str_size;
-
-			values_offset_data[result_index]++;
-		}
 	} else {
 		//! FIXME: use logical type instead
 		switch (physical_type) {
 		case PhysicalType::BOOL:
-			return ConvertPrimitiveToVariant<WRITE_DATA, bool, true>(source, result, offsets, count, selvec,
-			                                                         value_ids_selvec);
+			return ConvertPrimitiveToVariant<WRITE_DATA, bool>(source, result, offsets, count, selvec,
+			                                                   value_ids_selvec);
 		case PhysicalType::INT8:
-			return ConvertPrimitiveToVariant<WRITE_DATA, int8_t, false>(source, result, offsets, count, selvec,
-			                                                            value_ids_selvec);
+			return ConvertPrimitiveToVariant<WRITE_DATA, int8_t>(source, result, offsets, count, selvec,
+			                                                     value_ids_selvec);
 		case PhysicalType::INT16:
-			return ConvertPrimitiveToVariant<WRITE_DATA, int16_t, false>(source, result, offsets, count, selvec,
-			                                                             value_ids_selvec);
+			return ConvertPrimitiveToVariant<WRITE_DATA, int16_t>(source, result, offsets, count, selvec,
+			                                                      value_ids_selvec);
 		case PhysicalType::INT32:
-			return ConvertPrimitiveToVariant<WRITE_DATA, int32_t, false>(source, result, offsets, count, selvec,
-			                                                             value_ids_selvec);
+			return ConvertPrimitiveToVariant<WRITE_DATA, int32_t>(source, result, offsets, count, selvec,
+			                                                      value_ids_selvec);
 		case PhysicalType::INT64:
-			return ConvertPrimitiveToVariant<WRITE_DATA, int64_t, false>(source, result, offsets, count, selvec,
-			                                                             value_ids_selvec);
+			return ConvertPrimitiveToVariant<WRITE_DATA, int64_t>(source, result, offsets, count, selvec,
+			                                                      value_ids_selvec);
 		case PhysicalType::UINT8:
-			return ConvertPrimitiveToVariant<WRITE_DATA, uint8_t, false>(source, result, offsets, count, selvec,
-			                                                             value_ids_selvec);
+			return ConvertPrimitiveToVariant<WRITE_DATA, uint8_t>(source, result, offsets, count, selvec,
+			                                                      value_ids_selvec);
 		case PhysicalType::UINT16:
-			return ConvertPrimitiveToVariant<WRITE_DATA, uint16_t, false>(source, result, offsets, count, selvec,
-			                                                              value_ids_selvec);
+			return ConvertPrimitiveToVariant<WRITE_DATA, uint16_t>(source, result, offsets, count, selvec,
+			                                                       value_ids_selvec);
 		case PhysicalType::UINT32:
-			return ConvertPrimitiveToVariant<WRITE_DATA, uint32_t, false>(source, result, offsets, count, selvec,
-			                                                              value_ids_selvec);
+			return ConvertPrimitiveToVariant<WRITE_DATA, uint32_t>(source, result, offsets, count, selvec,
+			                                                       value_ids_selvec);
 		case PhysicalType::UINT64:
-			return ConvertPrimitiveToVariant<WRITE_DATA, uint64_t, false>(source, result, offsets, count, selvec,
-			                                                              value_ids_selvec);
+			return ConvertPrimitiveToVariant<WRITE_DATA, uint64_t>(source, result, offsets, count, selvec,
+			                                                       value_ids_selvec);
 		case PhysicalType::INT128:
-			return ConvertPrimitiveToVariant<WRITE_DATA, hugeint_t, false>(source, result, offsets, count, selvec,
-			                                                               value_ids_selvec);
+			return ConvertPrimitiveToVariant<WRITE_DATA, hugeint_t>(source, result, offsets, count, selvec,
+			                                                        value_ids_selvec);
 		case PhysicalType::UINT128:
-			return ConvertPrimitiveToVariant<WRITE_DATA, uhugeint_t, false>(source, result, offsets, count, selvec,
-			                                                                value_ids_selvec);
+			return ConvertPrimitiveToVariant<WRITE_DATA, uhugeint_t>(source, result, offsets, count, selvec,
+			                                                         value_ids_selvec);
 		case PhysicalType::FLOAT:
-			return ConvertPrimitiveToVariant<WRITE_DATA, float, false>(source, result, offsets, count, selvec,
-			                                                           value_ids_selvec);
+			return ConvertPrimitiveToVariant<WRITE_DATA, float>(source, result, offsets, count, selvec,
+			                                                    value_ids_selvec);
 		case PhysicalType::DOUBLE:
-			return ConvertPrimitiveToVariant<WRITE_DATA, double, false>(source, result, offsets, count, selvec,
-			                                                            value_ids_selvec);
+			return ConvertPrimitiveToVariant<WRITE_DATA, double>(source, result, offsets, count, selvec,
+			                                                     value_ids_selvec);
 		case PhysicalType::INTERVAL:
-			return ConvertPrimitiveToVariant<WRITE_DATA, interval_t, false>(source, result, offsets, count, selvec,
-			                                                                value_ids_selvec);
+			return ConvertPrimitiveToVariant<WRITE_DATA, interval_t>(source, result, offsets, count, selvec,
+			                                                         value_ids_selvec);
+		case PhysicalType::VARCHAR:
+			return ConvertPrimitiveToVariant<WRITE_DATA, string_t>(source, result, offsets, count, selvec,
+			                                                       value_ids_selvec);
 		default:
 			throw InternalException("Invalid PhysicalType for ConvertToVariant");
 		}
