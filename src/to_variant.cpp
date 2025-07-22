@@ -112,6 +112,8 @@ public:
 
 } // namespace
 
+//! -------- Determine the 'type_id' for the Value --------
+
 template <typename T, VariantLogicalType TYPE_ID>
 static VariantLogicalType GetTypeId(T val) {
 	return TYPE_ID;
@@ -122,46 +124,107 @@ VariantLogicalType GetTypeId<bool, VariantLogicalType::VARIANT_NULL>(bool val) {
 	return val ? VariantLogicalType::BOOL_TRUE : VariantLogicalType::BOOL_FALSE;
 }
 
+//! -------- Write the 'value' data for the Value --------
+
 template <typename T>
-static void WriteData(data_ptr_t ptr, const T &val, idx_t &length_size) {
+static void WriteData(data_ptr_t ptr, const T &val, vector<idx_t> &lengths) {
 	Store(val, ptr);
 }
-
-// Specialization for bool
 template <>
-void WriteData(data_ptr_t ptr, const bool &val, idx_t &length_size) {
+void WriteData(data_ptr_t ptr, const bool &val, vector<idx_t> &lengths) {
 	return;
 }
-
-// Specialization for string_t
 template <>
-void WriteData(data_ptr_t ptr, const string_t &val, idx_t &length_size) {
+void WriteData(data_ptr_t ptr, const string_t &val, vector<idx_t> &lengths) {
+	D_ASSERT(lengths.size() == 2);
 	auto str_length = val.GetSize();
 	VarintEncode(str_length, ptr);
-	memcpy(ptr + length_size, val.GetData(), str_length);
+	memcpy(ptr + lengths[0], val.GetData(), str_length);
 }
 
-// Generic version
+//! decimal
+
 template <typename T>
-idx_t GetValueSize(const T &val, idx_t &length_size) {
-	length_size = 0;
-	return sizeof(T);
+static void WriteDecimalData(data_ptr_t ptr, const T &val, vector<idx_t> &lengths, idx_t width, idx_t scale) {
+	throw InternalException("WriteDecimalData not implemented for this type");
+}
+template <>
+void WriteDecimalData(data_ptr_t ptr, const int16_t &val, vector<idx_t> &lengths, idx_t width, idx_t scale) {
+	D_ASSERT(lengths.size() == 3);
+	VarintEncode(width, ptr);
+	VarintEncode(scale, ptr + lengths[0]);
+	Store(val, ptr + lengths[0] + lengths[1]);
+}
+template <>
+void WriteDecimalData(data_ptr_t ptr, const int32_t &val, vector<idx_t> &lengths, idx_t width, idx_t scale) {
+	D_ASSERT(lengths.size() == 3);
+	VarintEncode(width, ptr);
+	VarintEncode(scale, ptr + lengths[0]);
+	Store(val, ptr + lengths[0] + lengths[1]);
+}
+template <>
+void WriteDecimalData(data_ptr_t ptr, const int64_t &val, vector<idx_t> &lengths, idx_t width, idx_t scale) {
+	D_ASSERT(lengths.size() == 3);
+	VarintEncode(width, ptr);
+	VarintEncode(scale, ptr + lengths[0]);
+	Store(val, ptr + lengths[0] + lengths[1]);
+}
+template <>
+void WriteDecimalData(data_ptr_t ptr, const hugeint_t &val, vector<idx_t> &lengths, idx_t width, idx_t scale) {
+	D_ASSERT(lengths.size() == 3);
+	VarintEncode(width, ptr);
+	VarintEncode(scale, ptr + lengths[0]);
+	Store(val, ptr + lengths[0] + lengths[1]);
 }
 
-// Specialization for string_t
+//! -------- Determine size of the 'value' data for the Value --------
+
+template <typename T>
+static void GetValueSize(const T &val, vector<idx_t> &lengths) {
+	lengths.push_back(sizeof(T));
+}
 template <>
-idx_t GetValueSize(const string_t &val, idx_t &length_size) {
+void GetValueSize(const bool &val, vector<idx_t> &lengths) {
+}
+template <>
+void GetValueSize(const string_t &val, vector<idx_t> &lengths) {
 	auto value_size = val.GetSize();
-	length_size = GetVarintSize(value_size);
-	return value_size;
+	lengths.push_back(GetVarintSize(value_size));
+	lengths.push_back(value_size);
 }
 
-// Specialization for bool
-template <>
-idx_t GetValueSize(const bool &val, idx_t &length_size) {
-	length_size = 0;
-	return 0;
+//! decimal
+
+template <typename T>
+static void GetDecimalValueSize(const T &val, vector<idx_t> &lengths, idx_t width, idx_t scale) {
+	throw InternalException("GetDecimalValueSize not implemented for this type");
 }
+template <>
+void GetDecimalValueSize(const int16_t &val, vector<idx_t> &lengths, idx_t width, idx_t scale) {
+	lengths.push_back(GetVarintSize(width));
+	lengths.push_back(GetVarintSize(scale));
+	lengths.push_back(sizeof(int16_t));
+}
+template <>
+void GetDecimalValueSize(const int32_t &val, vector<idx_t> &lengths, idx_t width, idx_t scale) {
+	lengths.push_back(GetVarintSize(width));
+	lengths.push_back(GetVarintSize(scale));
+	lengths.push_back(sizeof(int16_t));
+}
+template <>
+void GetDecimalValueSize(const int64_t &val, vector<idx_t> &lengths, idx_t width, idx_t scale) {
+	lengths.push_back(GetVarintSize(width));
+	lengths.push_back(GetVarintSize(scale));
+	lengths.push_back(sizeof(int16_t));
+}
+template <>
+void GetDecimalValueSize(const hugeint_t &val, vector<idx_t> &lengths, idx_t width, idx_t scale) {
+	lengths.push_back(GetVarintSize(width));
+	lengths.push_back(GetVarintSize(scale));
+	lengths.push_back(sizeof(hugeint_t));
+}
+
+//! -------- Convert primitive values to Variant --------
 
 template <bool WRITE_DATA, VariantLogicalType TYPE_ID, class T>
 static bool ConvertPrimitiveToVariant(Vector &source, VariantVectorData &result, DataChunk &offsets, idx_t count,
@@ -189,8 +252,12 @@ static bool ConvertPrimitiveToVariant(Vector &source, VariantVectorData &result,
 		auto &values_list_entry = result.values_data[result_index];
 
 		auto &val = source_data[index];
-		idx_t length_size = 0;
-		idx_t value_size = GetValueSize<T>(val, length_size);
+		vector<idx_t> lengths;
+		if (TYPE_ID == VariantLogicalType::DECIMAL) {
+			GetDecimalValueSize<T>(val, lengths, width, scale);
+		} else {
+			GetValueSize<T>(val, lengths);
+		}
 
 		if (WRITE_DATA) {
 			auto &blob_value = result.blob_data[result_index];
@@ -203,10 +270,15 @@ static bool ConvertPrimitiveToVariant(Vector &source, VariantVectorData &result,
 				//! Set for the parent where this child lives in the 'values' list
 				result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
 			}
-			WriteData<T>(blob_value_data + blob_offset, val, length_size);
+			if (TYPE_ID == VariantLogicalType::DECIMAL) {
+				WriteDecimalData<T>(blob_value_data + blob_offset, val, lengths, width, scale);
+			} else {
+				WriteData<T>(blob_value_data + blob_offset, val, lengths);
+			}
 		}
-		blob_offset += length_size + value_size;
-
+		for (auto &length : lengths) {
+			blob_offset += length;
+		}
 		values_offset_data[result_index]++;
 	}
 	return true;
