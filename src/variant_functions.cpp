@@ -6,6 +6,7 @@
 #include "duckdb/common/optional_idx.hpp"
 #include "duckdb/common/string_map_set.hpp"
 #include "duckdb/common/types/selection_vector.hpp"
+#include "duckdb/common/types/decimal.hpp"
 
 using namespace duckdb_yyjson; // NOLINT
 
@@ -517,6 +518,22 @@ yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat
 		auto string_length = VarintDecode<uint32_t>(ptr);
 		auto string_data = reinterpret_cast<const char *>(ptr);
 		return yyjson_mut_strncpy(doc, string_data, static_cast<size_t>(string_length));
+	}
+	case VariantLogicalType::DECIMAL: {
+		auto width = VarintDecode<idx_t>(ptr);
+		auto scale = VarintDecode<idx_t>(ptr);
+
+		string val_str;
+		if (width > DecimalWidth<int64_t>::max) {
+			val_str = Decimal::ToString(Load<hugeint_t>(ptr), width, scale);
+		} else if (width > DecimalWidth<int32_t>::max) {
+			val_str = Decimal::ToString(Load<int64_t>(ptr), width, scale);
+		} else if (width > DecimalWidth<int16_t>::max) {
+			val_str = Decimal::ToString(Load<int32_t>(ptr), width, scale);
+		} else {
+			val_str = Decimal::ToString(Load<int16_t>(ptr), width, scale);
+		}
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
 	}
 	case VariantLogicalType::ARRAY: {
 		auto count = VarintDecode<uint32_t>(ptr);
