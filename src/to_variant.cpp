@@ -419,6 +419,7 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 
 			SelectionVector children_selection(0, count);
 			for (idx_t i = 0; i < count; i++) {
+				auto index = source_format.sel->get_index(i);
 				auto result_index = selvec ? selvec->get_index(i) : i;
 
 				auto &blob_offset = blob_offset_data[result_index];
@@ -426,46 +427,58 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 				auto &children_list_entry = result.children_data[result_index];
 				auto &keys_list_entry = result.keys_data[result_index];
 
-				//! values
-				if (WRITE_DATA) {
-					//! type_id + byte_offset
-					auto values_offset = values_list_entry.offset + values_offset_data[result_index];
-					result.type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::OBJECT);
-					result.byte_offset_data[values_offset] = blob_offset;
-					if (value_ids_selvec) {
-						//! Set for the parent where this child lives in the 'values' list
-						result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
+				if (source_validity.RowIsValid(index)) {
+					//! values
+					if (WRITE_DATA) {
+						//! type_id + byte_offset
+						auto values_offset = values_list_entry.offset + values_offset_data[result_index];
+						result.type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::OBJECT);
+						result.byte_offset_data[values_offset] = blob_offset;
+						if (value_ids_selvec) {
+							//! Set for the parent where this child lives in the 'values' list
+							result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
+						}
+					}
+					//! value
+					const auto length_varint_size = GetVarintSize(children.size());
+					const auto child_offset_varint_size = GetVarintSize(children_offset_data[result_index]);
+					if (WRITE_DATA) {
+						auto &blob_value = result.blob_data[result_index];
+						auto blob_value_data = data_ptr_cast(blob_value.GetDataWriteable());
+
+						VarintEncode(children.size(), blob_value_data + blob_offset);
+						VarintEncode(children_offset_data[result_index],
+									blob_value_data + blob_offset + length_varint_size);
+					}
+					blob_offset += length_varint_size + child_offset_varint_size;
+
+					//! children
+					if (WRITE_DATA) {
+						auto children_offset = children_list_entry.offset + children_offset_data[result_index];
+						auto keys_offset = keys_list_entry.offset + keys_offset_data[result_index];
+						for (idx_t child_idx = 0; child_idx < children.size(); child_idx++) {
+							result.key_id_data[children_offset + child_idx] = keys_offset_data[result_index] + child_idx;
+							keys_selvec.set_index(keys_offset + child_idx, dictionary_indices[child_idx]);
+						}
+						//! Map from index of the child to the children.value_ids of the parent
+						children_selection.set_index(i, children_offset);
+					}
+					children_offset_data[result_index] += children.size();
+					keys_offset_data[result_index] += children.size();
+				} else {
+					if (WRITE_DATA) {
+						//! type_id + byte_offset
+						auto values_offset = values_list_entry.offset + values_offset_data[result_index];
+						result.type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::VARIANT_NULL);
+						result.byte_offset_data[values_offset] = blob_offset;
+						if (value_ids_selvec) {
+							//! Set for the parent where this child lives in the 'values' list
+							result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
+						}
 					}
 				}
+
 				values_offset_data[result_index]++;
-
-				//! value
-				const auto length_varint_size = GetVarintSize(children.size());
-				const auto child_offset_varint_size = GetVarintSize(children_offset_data[result_index]);
-				if (WRITE_DATA) {
-					auto &blob_value = result.blob_data[result_index];
-					auto blob_value_data = data_ptr_cast(blob_value.GetDataWriteable());
-
-					VarintEncode(children.size(), blob_value_data + blob_offset);
-					VarintEncode(children_offset_data[result_index],
-					             blob_value_data + blob_offset + length_varint_size);
-				}
-				blob_offset += length_varint_size + child_offset_varint_size;
-
-				//! children
-				if (WRITE_DATA) {
-					auto children_offset = children_list_entry.offset + children_offset_data[result_index];
-					auto keys_offset = keys_list_entry.offset + keys_offset_data[result_index];
-					for (idx_t child_idx = 0; child_idx < children.size(); child_idx++) {
-						result.key_id_data[children_offset + child_idx] = keys_offset_data[result_index] + child_idx;
-						keys_selvec.set_index(keys_offset + child_idx, dictionary_indices[child_idx]);
-					}
-					//! Map from index of the child to the children.value_ids of the parent
-					children_selection.set_index(i, children_offset);
-				}
-
-				children_offset_data[result_index] += children.size();
-				keys_offset_data[result_index] += children.size();
 			}
 
 			for (auto &child_ptr : children) {

@@ -60,6 +60,7 @@ select to_variant(var)::JSON from tbl;
 {"test":123,"hello":[4,5,6],"world":{"test":true}}
 {"test":123,"hello":[],"world":{"test":true}}
 
+# NULL primitives
 query I
 select to_variant(['test', null, 'hello this is a big string', null]);
 ----
@@ -70,7 +71,14 @@ select to_variant(['test', null, 'hello this is a big string', null])::JSON;
 ----
 ["test",null,"hello this is a big string",null]
 
+# NULL lists
 query I
 select to_variant([['test', null], [], null, [], ['hello this is a big string', null], null])::JSON;
 ----
 [["test",null],[],null,[],["hello this is a big string",null],null]
+
+# NULL structs
+query I
+select to_variant([[{'test': null}], [], [null::STRUCT(test varchar)], [], [{'test': 'hello this is a big string'}, null], null])::JSON;
+----
+[[{"test":null}],null,[null],null,[{"test":"hello this is a big string"},null],null]
