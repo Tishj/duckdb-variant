@@ -144,7 +144,7 @@ static VariantLogicalType GetTypeId(T val) {
 }
 
 template <>
-VariantLogicalType GetTypeId<bool, VariantLogicalType::VARIANT_NULL>(bool val) {
+VariantLogicalType GetTypeId<bool, VariantLogicalType::BOOL_TRUE>(bool val) {
 	return val ? VariantLogicalType::BOOL_TRUE : VariantLogicalType::BOOL_FALSE;
 }
 
@@ -321,7 +321,7 @@ static bool ConvertPrimitiveToVariant(Vector &source, VariantVectorData &result,
 
 		vector<idx_t> lengths;
 
-		if (source_validity.RowIsValid(index)) {
+		if (TYPE_ID != VariantLogicalType::VARIANT_NULL && source_validity.RowIsValid(index)) {
 			//! Write the value
 			auto &val = source_data[index];
 			GetValueSize<T>(val, lengths, payload);
@@ -586,16 +586,21 @@ static bool ConvertUnionToVariant(Vector &source, VariantVectorData &result, Dat
 
 	//! For some reason we can have nulls in members, so we need this check
 	//! So we are sure that we handled all nulls
-	auto &source_validity = source_format.validity;
 	auto values_offset_data = OffsetData::GetValues(offsets);
 	auto blob_offset_data = OffsetData::GetBlob(offsets);
 	for (idx_t i = 0; i < count; i++) {
-		for (idx_t child_idx = 1; child_idx < children.size(); child_idx++) {
-			auto &member_format = member_formats[child_idx];
-			auto &member_validity = member_format.validity;
-			if (member_validity.RowIsValid(member_format.sel->get_index(i))) {
+		bool is_null = true;
+		for (idx_t child_idx = 1; child_idx < children.size() && is_null; child_idx++) {
+			auto &child = *children[child_idx];
+			if (child.GetType().id() == LogicalTypeId::SQLNULL) {
 				continue;
 			}
+			auto &member_format = member_formats[child_idx];
+			auto &member_validity = member_format.validity;
+			is_null = !member_validity.RowIsValid(member_format.sel->get_index(i));
+		}
+		if (!is_null) {
+			continue;
 		}
 		//! This row is NULL entirely
 		auto result_index = selvec ? selvec->get_index(i) : i;
@@ -637,6 +642,7 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 	auto logical_type = type.id();
 	if (type.IsNested()) {
 		switch (logical_type) {
+		//! TODO: convert ARRAY and MAP
 		case LogicalTypeId::LIST:
 			return ConvertListToVariant<WRITE_DATA, IGNORE_NULLS>(source, result, offsets, count, selvec, keys_selvec,
 			                                                      dictionary, value_ids_selvec);
@@ -652,8 +658,11 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 	} else {
 		EmptyConversionPayload empty_payload;
 		switch (type.id()) {
+		case LogicalTypeId::SQLNULL:
+			return ConvertPrimitiveToVariant<WRITE_DATA, IGNORE_NULLS, VariantLogicalType::VARIANT_NULL, int32_t>(
+			    source, result, offsets, count, selvec, value_ids_selvec, empty_payload);
 		case LogicalTypeId::BOOLEAN:
-			return ConvertPrimitiveToVariant<WRITE_DATA, IGNORE_NULLS, VariantLogicalType::VARIANT_NULL, bool>(
+			return ConvertPrimitiveToVariant<WRITE_DATA, IGNORE_NULLS, VariantLogicalType::BOOL_TRUE, bool>(
 			    source, result, offsets, count, selvec, value_ids_selvec, empty_payload);
 		case LogicalTypeId::TINYINT:
 			return ConvertPrimitiveToVariant<WRITE_DATA, IGNORE_NULLS, VariantLogicalType::INT8, int8_t>(
@@ -784,8 +793,8 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 		case LogicalTypeId::BIT:
 		case LogicalTypeId::VARINT:
 		default:
-			throw NotImplementedException("Invalid PhysicalType (%s) for ConvertToVariant",
-			                              EnumUtil::ToString(physical_type));
+			throw NotImplementedException("Invalid LogicalType (%s) for ConvertToVariant",
+			                              EnumUtil::ToString(logical_type));
 		}
 	}
 	return true;

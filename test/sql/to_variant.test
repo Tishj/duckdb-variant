@@ -105,3 +105,16 @@ null
 null
 null
 null
+
+statement ok
+create type tp as UNION(a VARCHAR, b "NULL", c INTEGER, d BOOL, e DATE);
+
+query I
+select ['test'::VARCHAR::tp, null::VARCHAR::tp, 1::INTEGER::tp, true::BOOL::tp, '1990/07/21'::DATE::tp]::tp[]
+----
+[test, NULL, 1, true, 1990-07-21]
+
+query I
+select to_variant(['test'::VARCHAR::tp, null::VARCHAR::tp, 1::INTEGER::tp, true::BOOL::tp, '1990/07/21'::DATE::tp]::tp[])::JSON
+----
+["test",null,1,true,"1990-07-21"]
