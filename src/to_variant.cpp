@@ -112,77 +112,14 @@ public:
 
 } // namespace
 
-VariantLogicalType LogicalTypeToVariant(LogicalTypeId type) {
-	switch (type) {
-	case LogicalTypeId::BOOLEAN: {
-		//! This won't be used directly anyway
-		return VariantLogicalType::BOOL_TRUE;
-	}
-	case LogicalTypeId::TINYINT:
-		return VariantLogicalType::INT8;
-	case LogicalTypeId::UTINYINT:
-		return VariantLogicalType::UINT8;
-	case LogicalTypeId::SMALLINT:
-		return VariantLogicalType::INT16;
-	case LogicalTypeId::USMALLINT:
-		return VariantLogicalType::UINT16;
-	case LogicalTypeId::SQLNULL:
-		return VariantLogicalType::VARIANT_NULL;
-	case LogicalTypeId::DATE:
-		return VariantLogicalType::DATE;
-	case LogicalTypeId::INTEGER:
-		return VariantLogicalType::INT32;
-	case LogicalTypeId::UINTEGER:
-		return VariantLogicalType::UINT32;
-	case LogicalTypeId::BIGINT:
-		return VariantLogicalType::INT64;
-	case LogicalTypeId::TIME:
-		return VariantLogicalType::TIME;
-	case LogicalTypeId::TIMESTAMP:
-		return VariantLogicalType::TIMESTAMP_MICROS;
-	case LogicalTypeId::TIMESTAMP_SEC:
-		return VariantLogicalType::TIMESTAMP_SEC;
-	case LogicalTypeId::TIMESTAMP_NS:
-		return VariantLogicalType::TIMESTAMP_NANOS;
-	case LogicalTypeId::TIMESTAMP_MS:
-		return VariantLogicalType::TIMESTAMP_MILIS;
-	case LogicalTypeId::TIME_TZ:
-		return VariantLogicalType::TIME_TZ;
-	case LogicalTypeId::TIMESTAMP_TZ:
-		return VariantLogicalType::TIMESTAMP_MICROS_TZ;
-	case LogicalTypeId::UBIGINT:
-		return VariantLogicalType::UINT64;
-	case LogicalTypeId::UHUGEINT:
-		return VariantLogicalType::UINT128;
-	case LogicalTypeId::HUGEINT:
-		return VariantLogicalType::INT128;
-	case LogicalTypeId::UUID:
-		return VariantLogicalType::UUID;
-	case LogicalTypeId::FLOAT:
-		return VariantLogicalType::FLOAT;
-	case LogicalTypeId::DOUBLE:
-		return VariantLogicalType::DOUBLE;
-	case LogicalTypeId::DECIMAL:
-		return VariantLogicalType::DECIMAL;
-	case LogicalTypeId::VARCHAR:
-		return VariantLogicalType::VARCHAR;
-	case LogicalTypeId::BLOB:
-		return VariantLogicalType::BLOB;
-	case LogicalTypeId::INTERVAL:
-		return VariantLogicalType::INTERVAL;
-	default:
-		throw NotImplementedException("Can't map from LogicalTypeId (%s) to VariantLogicalType",
-		                              EnumUtil::ToString(type));
-	}
+template <typename T, VariantLogicalType TYPE_ID>
+static VariantLogicalType GetTypeId(T val) {
+	return TYPE_ID;
 }
 
-static VariantLogicalType GetTypeId(bool val, const VariantLogicalType) {
+template <>
+VariantLogicalType GetTypeId<bool, VariantLogicalType::VARIANT_NULL>(bool val) {
 	return val ? VariantLogicalType::BOOL_TRUE : VariantLogicalType::BOOL_FALSE;
-}
-
-template <typename T>
-static VariantLogicalType GetTypeId(T val, const VariantLogicalType type) {
-	return type;
 }
 
 template <typename T>
@@ -226,14 +163,20 @@ idx_t GetValueSize(const bool &val, idx_t &length_size) {
 	return 0;
 }
 
-template <bool WRITE_DATA, class T>
+template <bool WRITE_DATA, VariantLogicalType TYPE_ID, class T>
 static bool ConvertPrimitiveToVariant(Vector &source, VariantVectorData &result, DataChunk &offsets, idx_t count,
                                       SelectionVector *selvec, SelectionVector *value_ids_selvec) {
 	const auto &type = source.GetType();
-	auto variant_type = LogicalTypeToVariant(type.id());
 
 	auto blob_offset_data = OffsetData::GetBlob(offsets);
 	auto values_offset_data = OffsetData::GetValues(offsets);
+
+	//! Values only used for Decimal conversion
+	uint8_t width;
+	uint8_t scale;
+	if (TYPE_ID == VariantLogicalType::DECIMAL) {
+		type.GetDecimalProperties(width, scale);
+	}
 
 	UnifiedVectorFormat source_format;
 	source.ToUnifiedFormat(count, source_format);
@@ -254,7 +197,7 @@ static bool ConvertPrimitiveToVariant(Vector &source, VariantVectorData &result,
 			auto blob_value_data = data_ptr_cast(blob_value.GetDataWriteable());
 
 			auto values_offset = values_list_entry.offset + values_offset_data[result_index];
-			result.type_ids_data[values_offset] = static_cast<uint8_t>(GetTypeId(val, variant_type));
+			result.type_ids_data[values_offset] = static_cast<uint8_t>(GetTypeId<T, TYPE_ID>(val));
 			result.byte_offset_data[values_offset] = blob_offset;
 			if (value_ids_selvec) {
 				//! Set for the parent where this child lives in the 'values' list
@@ -439,55 +382,80 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 			throw NotImplementedException("Can't convert nested physical type '%s'", EnumUtil::ToString(physical_type));
 		}
 	} else {
-		//! FIXME: use logical type instead
-		switch (physical_type) {
-		case PhysicalType::BOOL:
-			return ConvertPrimitiveToVariant<WRITE_DATA, bool>(source, result, offsets, count, selvec,
-			                                                   value_ids_selvec);
-		case PhysicalType::INT8:
-			return ConvertPrimitiveToVariant<WRITE_DATA, int8_t>(source, result, offsets, count, selvec,
-			                                                     value_ids_selvec);
-		case PhysicalType::INT16:
-			return ConvertPrimitiveToVariant<WRITE_DATA, int16_t>(source, result, offsets, count, selvec,
-			                                                      value_ids_selvec);
-		case PhysicalType::INT32:
-			return ConvertPrimitiveToVariant<WRITE_DATA, int32_t>(source, result, offsets, count, selvec,
-			                                                      value_ids_selvec);
-		case PhysicalType::INT64:
-			return ConvertPrimitiveToVariant<WRITE_DATA, int64_t>(source, result, offsets, count, selvec,
-			                                                      value_ids_selvec);
-		case PhysicalType::UINT8:
-			return ConvertPrimitiveToVariant<WRITE_DATA, uint8_t>(source, result, offsets, count, selvec,
-			                                                      value_ids_selvec);
-		case PhysicalType::UINT16:
-			return ConvertPrimitiveToVariant<WRITE_DATA, uint16_t>(source, result, offsets, count, selvec,
-			                                                       value_ids_selvec);
-		case PhysicalType::UINT32:
-			return ConvertPrimitiveToVariant<WRITE_DATA, uint32_t>(source, result, offsets, count, selvec,
-			                                                       value_ids_selvec);
-		case PhysicalType::UINT64:
-			return ConvertPrimitiveToVariant<WRITE_DATA, uint64_t>(source, result, offsets, count, selvec,
-			                                                       value_ids_selvec);
-		case PhysicalType::INT128:
-			return ConvertPrimitiveToVariant<WRITE_DATA, hugeint_t>(source, result, offsets, count, selvec,
-			                                                        value_ids_selvec);
-		case PhysicalType::UINT128:
-			return ConvertPrimitiveToVariant<WRITE_DATA, uhugeint_t>(source, result, offsets, count, selvec,
-			                                                         value_ids_selvec);
-		case PhysicalType::FLOAT:
-			return ConvertPrimitiveToVariant<WRITE_DATA, float>(source, result, offsets, count, selvec,
-			                                                    value_ids_selvec);
-		case PhysicalType::DOUBLE:
-			return ConvertPrimitiveToVariant<WRITE_DATA, double>(source, result, offsets, count, selvec,
-			                                                     value_ids_selvec);
-		case PhysicalType::INTERVAL:
-			return ConvertPrimitiveToVariant<WRITE_DATA, interval_t>(source, result, offsets, count, selvec,
-			                                                         value_ids_selvec);
-		case PhysicalType::VARCHAR:
-			return ConvertPrimitiveToVariant<WRITE_DATA, string_t>(source, result, offsets, count, selvec,
-			                                                       value_ids_selvec);
+		switch (type.id()) {
+		case LogicalTypeId::BOOLEAN:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::VARIANT_NULL, bool>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::TINYINT:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::INT8, int8_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::UTINYINT:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::UINT8, uint8_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::SMALLINT:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::INT16, int16_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::USMALLINT:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::UINT16, uint16_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::INTEGER:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::INT32, int32_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::UINTEGER:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::UINT32, uint32_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::BIGINT:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::INT64, int64_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::UBIGINT:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::UINT64, uint64_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::HUGEINT:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::INT128, hugeint_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::UHUGEINT:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::UINT128, uhugeint_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::DATE:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::DATE, date_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::TIME:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::TIME_MICROS, dtime_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::TIME_NS:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::TIME_NANOS, dtime_ns_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::TIMESTAMP:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::TIMESTAMP_MICROS, timestamp_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::TIMESTAMP_SEC:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::TIMESTAMP_SEC, timestamp_sec_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::TIMESTAMP_NS:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::TIMESTAMP_NANOS, timestamp_ns_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::TIMESTAMP_MS:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::TIMESTAMP_MILIS, timestamp_ms_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::TIME_TZ:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::TIME_MICROS_TZ, dtime_tz_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::TIMESTAMP_TZ:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::TIMESTAMP_MICROS_TZ, timestamp_tz_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::UUID:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::UUID, hugeint_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::FLOAT:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::FLOAT, float>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::DOUBLE:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::DOUBLE, double>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::DECIMAL: {
+			switch (physical_type) {
+			case PhysicalType::INT16:
+				return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::DECIMAL, int16_t>(source, result, offsets, count, selvec, value_ids_selvec);
+			case PhysicalType::INT32:
+				return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::DECIMAL, int32_t>(source, result, offsets, count, selvec, value_ids_selvec);
+			case PhysicalType::INT64:
+				return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::DECIMAL, int64_t>(source, result, offsets, count, selvec, value_ids_selvec);
+			case PhysicalType::INT128:
+				return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::DECIMAL, hugeint_t>(source, result, offsets, count, selvec, value_ids_selvec);
+			default:
+				throw NotImplementedException("Can't convert DECIMAL value of physical type: %s", EnumUtil::ToString(physical_type));
+			};
+		}
+		case LogicalTypeId::VARCHAR:
+		case LogicalTypeId::CHAR:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::VARCHAR, string_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::BLOB:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::BLOB, string_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::INTERVAL:
+			return ConvertPrimitiveToVariant<WRITE_DATA, VariantLogicalType::INTERVAL, interval_t>(source, result, offsets, count, selvec, value_ids_selvec);
+		case LogicalTypeId::ENUM:
+			throw NotImplementedException("ENUM conversion not supported");
+		case LogicalTypeId::BIT:
+		case LogicalTypeId::VARINT:
 		default:
-			throw InternalException("Invalid PhysicalType for ConvertToVariant");
+			throw NotImplementedException("Invalid PhysicalType (%s) for ConvertToVariant", EnumUtil::ToString(physical_type));
 		}
 	}
 	return true;
