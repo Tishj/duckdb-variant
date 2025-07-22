@@ -300,11 +300,209 @@ static bool ConvertPrimitiveToVariant(Vector &source, VariantVectorData &result,
 	return true;
 }
 
+//! fwd declare the ConvertToVariant function
+template <bool WRITE_DATA>
+static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChunk &offsets, idx_t count,
+                             SelectionVector *selvec, SelectionVector &keys_selvec, StringDictionary &dictionary,
+                             SelectionVector *value_ids_selvec);
+
+template <bool WRITE_DATA>
+static bool ConvertListToVariant(Vector &source, VariantVectorData &result, DataChunk &offsets, idx_t count,
+                             SelectionVector *selvec, SelectionVector &keys_selvec, StringDictionary &dictionary,
+                             SelectionVector *value_ids_selvec) {
+	auto blob_offset_data = OffsetData::GetBlob(offsets);
+	auto values_offset_data = OffsetData::GetValues(offsets);
+	auto children_offset_data = OffsetData::GetChildren(offsets);
+
+	UnifiedVectorFormat source_format;
+	source.ToUnifiedFormat(count, source_format);
+	auto &source_validity = source_format.validity;
+	auto source_data = source_format.GetData<list_entry_t>(source_format);
+
+	auto list_size = ListVector::GetListSize(source);
+	//! Create a selection vector that maps to the right row in the 'result' for the child vector
+	SelectionVector new_selection(0, list_size);
+	//! Create a selection vector that maps to the children.value_id entry of the parent
+	SelectionVector children_selection(0, list_size);
+	for (idx_t i = 0; i < count; i++) {
+		const auto index = source_format.sel->get_index(i);
+		const auto result_index = selvec ? selvec->get_index(i) : i;
+
+		auto &blob_offset = blob_offset_data[result_index];
+		auto &values_list_entry = result.values_data[result_index];
+		auto &children_list_entry = result.children_data[result_index];
+
+		if (source_validity.RowIsValid(index)) {
+			auto &entry = source_data[index];
+			//! values
+			if (WRITE_DATA) {
+				//! type_id + byte_offset
+				auto values_offset = values_list_entry.offset + values_offset_data[result_index];
+				result.type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::ARRAY);
+				result.byte_offset_data[values_offset] = blob_offset;
+				if (value_ids_selvec) {
+					//! Set for the parent where this child lives in the 'values' list
+					result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
+				}
+			}
+			//! value
+			const auto length_varint_size = GetVarintSize(entry.length);
+			const auto child_offset_varint_size =
+				length_varint_size ? GetVarintSize(children_offset_data[result_index]) : 0;
+			if (WRITE_DATA) {
+				auto &blob_value = result.blob_data[result_index];
+				auto blob_value_data = data_ptr_cast(blob_value.GetDataWriteable());
+
+				VarintEncode(entry.length, blob_value_data + blob_offset);
+				if (entry.length) {
+					VarintEncode(children_offset_data[result_index],
+								blob_value_data + blob_offset + length_varint_size);
+				}
+			}
+			blob_offset += length_varint_size + child_offset_varint_size;
+
+			auto children_offset = children_list_entry.offset + children_offset_data[result_index];
+			for (idx_t child_idx = 0; child_idx < entry.length; child_idx++) {
+				//! Set up the selection vector for the child of the list vector
+				new_selection.set_index(child_idx + entry.offset, result_index);
+				if (WRITE_DATA) {
+					children_selection.set_index(child_idx + entry.offset, children_offset + child_idx);
+					result.key_id_validity.SetInvalid(children_offset + child_idx);
+				}
+			}
+			children_offset_data[result_index] += entry.length;
+		} else {
+			if (WRITE_DATA) {
+				//! type_id + byte_offset
+				auto values_offset = values_list_entry.offset + values_offset_data[result_index];
+				result.type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::VARIANT_NULL);
+				result.byte_offset_data[values_offset] = blob_offset;
+				if (value_ids_selvec) {
+					//! Set for the parent where this child lives in the 'values' list
+					result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
+				}
+			}
+		}
+
+		values_offset_data[result_index]++;
+	}
+	//! Now write the child vector of the list (for all rows)
+	auto &entry = ListVector::GetEntry(source);
+	return ConvertToVariant<WRITE_DATA>(entry, result, offsets, list_size, &new_selection, keys_selvec, dictionary, &children_selection);
+}
+
+template <bool WRITE_DATA>
+static bool ConvertStructToVariant(Vector &source, VariantVectorData &result, DataChunk &offsets, idx_t count,
+                             SelectionVector *selvec, SelectionVector &keys_selvec, StringDictionary &dictionary,
+                             SelectionVector *value_ids_selvec) {
+	auto values_offset_data = OffsetData::GetValues(offsets);
+	auto blob_offset_data = OffsetData::GetBlob(offsets);
+	auto keys_offset_data = OffsetData::GetKeys(offsets);
+	auto children_offset_data = OffsetData::GetChildren(offsets);
+	auto &type = source.GetType();
+
+	UnifiedVectorFormat source_format;
+	source.ToUnifiedFormat(count, source_format);
+	auto &source_validity = source_format.validity;
+
+	auto &children = StructVector::GetEntries(source);
+
+	//! Look up all the dictionary indices for the struct keys
+	vector<uint32_t> dictionary_indices(children.size());
+	if (WRITE_DATA) {
+		auto &struct_children = StructType::GetChildTypes(type);
+		for (idx_t child_idx = 0; child_idx < children.size(); child_idx++) {
+			auto &struct_child = struct_children[child_idx];
+			string_t struct_child_str(struct_child.first.c_str(), struct_child.first.size());
+			dictionary_indices[child_idx] = dictionary.Find(std::move(struct_child_str));
+		}
+	}
+
+	SelectionVector children_selection(0, count);
+	for (idx_t i = 0; i < count; i++) {
+		auto index = source_format.sel->get_index(i);
+		auto result_index = selvec ? selvec->get_index(i) : i;
+
+		auto &blob_offset = blob_offset_data[result_index];
+		auto &values_list_entry = result.values_data[result_index];
+		auto &children_list_entry = result.children_data[result_index];
+		auto &keys_list_entry = result.keys_data[result_index];
+
+		if (source_validity.RowIsValid(index)) {
+			//! values
+			if (WRITE_DATA) {
+				//! type_id + byte_offset
+				auto values_offset = values_list_entry.offset + values_offset_data[result_index];
+				result.type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::OBJECT);
+				result.byte_offset_data[values_offset] = blob_offset;
+				if (value_ids_selvec) {
+					//! Set for the parent where this child lives in the 'values' list
+					result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
+				}
+			}
+			//! value
+			const auto length_varint_size = GetVarintSize(children.size());
+			const auto child_offset_varint_size = GetVarintSize(children_offset_data[result_index]);
+			if (WRITE_DATA) {
+				auto &blob_value = result.blob_data[result_index];
+				auto blob_value_data = data_ptr_cast(blob_value.GetDataWriteable());
+
+				VarintEncode(children.size(), blob_value_data + blob_offset);
+				VarintEncode(children_offset_data[result_index],
+							blob_value_data + blob_offset + length_varint_size);
+			}
+			blob_offset += length_varint_size + child_offset_varint_size;
+
+			//! children
+			if (WRITE_DATA) {
+				auto children_offset = children_list_entry.offset + children_offset_data[result_index];
+				auto keys_offset = keys_list_entry.offset + keys_offset_data[result_index];
+				for (idx_t child_idx = 0; child_idx < children.size(); child_idx++) {
+					result.key_id_data[children_offset + child_idx] = keys_offset_data[result_index] + child_idx;
+					keys_selvec.set_index(keys_offset + child_idx, dictionary_indices[child_idx]);
+				}
+				//! Map from index of the child to the children.value_ids of the parent
+				children_selection.set_index(i, children_offset);
+			}
+			children_offset_data[result_index] += children.size();
+			keys_offset_data[result_index] += children.size();
+		} else {
+			if (WRITE_DATA) {
+				//! type_id + byte_offset
+				auto values_offset = values_list_entry.offset + values_offset_data[result_index];
+				result.type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::VARIANT_NULL);
+				result.byte_offset_data[values_offset] = blob_offset;
+				if (value_ids_selvec) {
+					//! Set for the parent where this child lives in the 'values' list
+					result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
+				}
+			}
+		}
+
+		values_offset_data[result_index]++;
+	}
+
+	for (auto &child_ptr : children) {
+		auto &child = *child_ptr;
+
+		if (!ConvertToVariant<WRITE_DATA>(child, result, offsets, count, selvec, keys_selvec, dictionary, &children_selection)) {
+			return false;
+		}
+		if (WRITE_DATA) {
+			//! Now forward the selection to point to the next index in the children.value_ids
+			for (idx_t i = 0; i < count; i++) {
+				children_selection[i]++;
+			}
+		}
+	}
+	return true;
+}
+
 //! * @param source The Vector of arbitrary type to process
 //! * @param result The result Vector to write the variant data to
 //! * @param offsets The offsets to gather per row
 //! * @param count The size of the source vector
-//! * @param selvec The selection vector from i (< count) to the index in the offsets Vectors
+//! * @param selvec The selection vector from i (< count) to the index in the result Vector
 //! * @param keys_selvec The selection vector to populate with mapping from keys index -> dictionary index
 //! * @param dictionary The dictionary to look up the dictionary index from
 //! * @param value_ids_selvec The selection vector from i (< count) to the index in the children.value_ids selvec, to
@@ -317,184 +515,12 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 
 	auto physical_type = type.InternalType();
 	auto logical_type = type.id();
-	auto blob_offset_data = OffsetData::GetBlob(offsets);
-	auto values_offset_data = OffsetData::GetValues(offsets);
-
-	UnifiedVectorFormat source_format;
-	source.ToUnifiedFormat(count, source_format);
-	auto &source_validity = source_format.validity;
 	if (type.IsNested()) {
-		auto keys_offset_data = OffsetData::GetKeys(offsets);
-		auto children_offset_data = OffsetData::GetChildren(offsets);
 		switch (logical_type) {
-		case LogicalTypeId::LIST: {
-			auto source_data = source_format.GetData<list_entry_t>(source_format);
-
-			auto list_size = ListVector::GetListSize(source);
-			//! Create a selection vector that maps to the right row in the 'result' for the child vector
-			SelectionVector new_selection(0, list_size);
-			//! Create a selection vector that maps to the children.value_id entry of the parent
-			SelectionVector children_selection(0, list_size);
-			for (idx_t i = 0; i < count; i++) {
-				const auto index = source_format.sel->get_index(i);
-				const auto result_index = selvec ? selvec->get_index(i) : i;
-
-				auto &blob_offset = blob_offset_data[result_index];
-				auto &values_list_entry = result.values_data[result_index];
-				auto &children_list_entry = result.children_data[result_index];
-
-				if (source_validity.RowIsValid(index)) {
-					auto &entry = source_data[index];
-					//! values
-					if (WRITE_DATA) {
-						//! type_id + byte_offset
-						auto values_offset = values_list_entry.offset + values_offset_data[result_index];
-						result.type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::ARRAY);
-						result.byte_offset_data[values_offset] = blob_offset;
-						if (value_ids_selvec) {
-							//! Set for the parent where this child lives in the 'values' list
-							result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
-						}
-					}
-					//! value
-					const auto length_varint_size = GetVarintSize(entry.length);
-					const auto child_offset_varint_size =
-						length_varint_size ? GetVarintSize(children_offset_data[result_index]) : 0;
-					if (WRITE_DATA) {
-						auto &blob_value = result.blob_data[result_index];
-						auto blob_value_data = data_ptr_cast(blob_value.GetDataWriteable());
-
-						VarintEncode(entry.length, blob_value_data + blob_offset);
-						if (entry.length) {
-							VarintEncode(children_offset_data[result_index],
-										blob_value_data + blob_offset + length_varint_size);
-						}
-					}
-					blob_offset += length_varint_size + child_offset_varint_size;
-
-					auto children_offset = children_list_entry.offset + children_offset_data[result_index];
-					for (idx_t child_idx = 0; child_idx < entry.length; child_idx++) {
-						//! Set up the selection vector for the child of the list vector
-						new_selection.set_index(child_idx + entry.offset, result_index);
-						if (WRITE_DATA) {
-							children_selection.set_index(child_idx + entry.offset, children_offset + child_idx);
-							result.key_id_validity.SetInvalid(children_offset + child_idx);
-						}
-					}
-					children_offset_data[result_index] += entry.length;
-				} else {
-					if (WRITE_DATA) {
-						//! type_id + byte_offset
-						auto values_offset = values_list_entry.offset + values_offset_data[result_index];
-						result.type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::VARIANT_NULL);
-						result.byte_offset_data[values_offset] = blob_offset;
-						if (value_ids_selvec) {
-							//! Set for the parent where this child lives in the 'values' list
-							result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
-						}
-					}
-				}
-
-				values_offset_data[result_index]++;
-			}
-			//! Now write the child vector of the list (for all rows)
-			auto &entry = ListVector::GetEntry(source);
-			ConvertToVariant<WRITE_DATA>(entry, result, offsets, list_size, &new_selection, keys_selvec, dictionary,
-			                             &children_selection);
-			break;
-		}
-		case LogicalTypeId::STRUCT: {
-			auto &children = StructVector::GetEntries(source);
-			auto &struct_children = StructType::GetChildTypes(type);
-
-			//! Look up all the dictionary indices for the struct keys
-			vector<uint32_t> dictionary_indices(children.size());
-			if (WRITE_DATA) {
-				for (idx_t child_idx = 0; child_idx < children.size(); child_idx++) {
-					auto &struct_child = struct_children[child_idx];
-					string_t struct_child_str(struct_child.first.c_str(), struct_child.first.size());
-					dictionary_indices[child_idx] = dictionary.Find(std::move(struct_child_str));
-				}
-			}
-
-			SelectionVector children_selection(0, count);
-			for (idx_t i = 0; i < count; i++) {
-				auto index = source_format.sel->get_index(i);
-				auto result_index = selvec ? selvec->get_index(i) : i;
-
-				auto &blob_offset = blob_offset_data[result_index];
-				auto &values_list_entry = result.values_data[result_index];
-				auto &children_list_entry = result.children_data[result_index];
-				auto &keys_list_entry = result.keys_data[result_index];
-
-				if (source_validity.RowIsValid(index)) {
-					//! values
-					if (WRITE_DATA) {
-						//! type_id + byte_offset
-						auto values_offset = values_list_entry.offset + values_offset_data[result_index];
-						result.type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::OBJECT);
-						result.byte_offset_data[values_offset] = blob_offset;
-						if (value_ids_selvec) {
-							//! Set for the parent where this child lives in the 'values' list
-							result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
-						}
-					}
-					//! value
-					const auto length_varint_size = GetVarintSize(children.size());
-					const auto child_offset_varint_size = GetVarintSize(children_offset_data[result_index]);
-					if (WRITE_DATA) {
-						auto &blob_value = result.blob_data[result_index];
-						auto blob_value_data = data_ptr_cast(blob_value.GetDataWriteable());
-
-						VarintEncode(children.size(), blob_value_data + blob_offset);
-						VarintEncode(children_offset_data[result_index],
-									blob_value_data + blob_offset + length_varint_size);
-					}
-					blob_offset += length_varint_size + child_offset_varint_size;
-
-					//! children
-					if (WRITE_DATA) {
-						auto children_offset = children_list_entry.offset + children_offset_data[result_index];
-						auto keys_offset = keys_list_entry.offset + keys_offset_data[result_index];
-						for (idx_t child_idx = 0; child_idx < children.size(); child_idx++) {
-							result.key_id_data[children_offset + child_idx] = keys_offset_data[result_index] + child_idx;
-							keys_selvec.set_index(keys_offset + child_idx, dictionary_indices[child_idx]);
-						}
-						//! Map from index of the child to the children.value_ids of the parent
-						children_selection.set_index(i, children_offset);
-					}
-					children_offset_data[result_index] += children.size();
-					keys_offset_data[result_index] += children.size();
-				} else {
-					if (WRITE_DATA) {
-						//! type_id + byte_offset
-						auto values_offset = values_list_entry.offset + values_offset_data[result_index];
-						result.type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::VARIANT_NULL);
-						result.byte_offset_data[values_offset] = blob_offset;
-						if (value_ids_selvec) {
-							//! Set for the parent where this child lives in the 'values' list
-							result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
-						}
-					}
-				}
-
-				values_offset_data[result_index]++;
-			}
-
-			for (auto &child_ptr : children) {
-				auto &child = *child_ptr;
-
-				ConvertToVariant<WRITE_DATA>(child, result, offsets, count, selvec, keys_selvec, dictionary,
-				                             &children_selection);
-				if (WRITE_DATA) {
-					//! Now forward the selection to point to the next index in the children.value_ids
-					for (idx_t i = 0; i < count; i++) {
-						children_selection[i]++;
-					}
-				}
-			}
-			break;
-		}
+		case LogicalTypeId::LIST:
+			return ConvertListToVariant<WRITE_DATA>(source, result, offsets, count, selvec, keys_selvec, dictionary, value_ids_selvec);
+		case LogicalTypeId::STRUCT:
+			return ConvertStructToVariant<WRITE_DATA>(source, result, offsets, count, selvec, keys_selvec, dictionary, value_ids_selvec);
 		default:
 			throw NotImplementedException("Can't convert nested type '%s'", EnumUtil::ToString(logical_type));
 		};
