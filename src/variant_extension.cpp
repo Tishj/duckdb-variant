@@ -54,6 +54,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	loader.RegisterCastFunction(variant_type, LogicalType::JSON(), VariantFunctions::CastVARIANTToJSON);
 	ScalarFunction to_variant_func("to_variant", {LogicalType::ANY}, variant_type, ToVariantFunction);
 	to_variant_func.bind = ToVariantBind;
+	to_variant_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
 	loader.RegisterFunction(to_variant_func);
 }
 
