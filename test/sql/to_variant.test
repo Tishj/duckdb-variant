@@ -82,3 +82,10 @@ query I
 select to_variant([[{'test': null}], [], [null::STRUCT(test varchar)], [], [{'test': 'hello this is a big string'}, null], null])::JSON;
 ----
 [[{"test":null}],null,[null],null,[{"test":"hello this is a big string"},null],null]
+
+# Enum value
+
+query I
+select to_variant('test'::ENUM('test', 'hello', 'world'))::JSON;
+----
+""
