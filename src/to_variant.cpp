@@ -322,11 +322,12 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 
 	UnifiedVectorFormat source_format;
 	source.ToUnifiedFormat(count, source_format);
+	auto &source_validity = source_format.validity;
 	if (type.IsNested()) {
 		auto keys_offset_data = OffsetData::GetKeys(offsets);
 		auto children_offset_data = OffsetData::GetChildren(offsets);
-		//! FIXME: use logical type instead
-		if (physical_type == PhysicalType::LIST) {
+		switch (logical_type) {
+		case LogicalTypeId::LIST: {
 			auto source_data = source_format.GetData<list_entry_t>(source_format);
 
 			auto list_size = ListVector::GetListSize(source);
@@ -337,59 +338,72 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 			for (idx_t i = 0; i < count; i++) {
 				const auto index = source_format.sel->get_index(i);
 				const auto result_index = selvec ? selvec->get_index(i) : i;
-				auto &entry = source_data[index];
 
 				auto &blob_offset = blob_offset_data[result_index];
 				auto &values_list_entry = result.values_data[result_index];
 				auto &children_list_entry = result.children_data[result_index];
 
-				//! values
-				if (WRITE_DATA) {
-					//! type_id + byte_offset
-					auto values_offset = values_list_entry.offset + values_offset_data[result_index];
-					result.type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::ARRAY);
-					result.byte_offset_data[values_offset] = blob_offset;
-					if (value_ids_selvec) {
-						//! Set for the parent where this child lives in the 'values' list
-						result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
-					}
-				}
-				values_offset_data[result_index]++;
-
-				//! value
-				const auto length_varint_size = GetVarintSize(entry.length);
-				const auto child_offset_varint_size =
-				    length_varint_size ? GetVarintSize(children_offset_data[result_index]) : 0;
-				if (WRITE_DATA) {
-					auto &blob_value = result.blob_data[result_index];
-					auto blob_value_data = data_ptr_cast(blob_value.GetDataWriteable());
-
-					VarintEncode(entry.length, blob_value_data + blob_offset);
-					if (entry.length) {
-						VarintEncode(children_offset_data[result_index],
-						             blob_value_data + blob_offset + length_varint_size);
-					}
-				}
-				blob_offset += length_varint_size + child_offset_varint_size;
-
-				auto children_offset = children_list_entry.offset + children_offset_data[result_index];
-				for (idx_t child_idx = 0; child_idx < entry.length; child_idx++) {
-					//! Set up the selection vector for the child of the list vector
-					new_selection.set_index(child_idx + entry.offset, result_index);
+				if (source_validity.RowIsValid(index)) {
+					auto &entry = source_data[index];
+					//! values
 					if (WRITE_DATA) {
-						children_selection.set_index(child_idx + entry.offset, children_offset + child_idx);
-						result.key_id_validity.SetInvalid(children_offset + child_idx);
+						//! type_id + byte_offset
+						auto values_offset = values_list_entry.offset + values_offset_data[result_index];
+						result.type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::ARRAY);
+						result.byte_offset_data[values_offset] = blob_offset;
+						if (value_ids_selvec) {
+							//! Set for the parent where this child lives in the 'values' list
+							result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
+						}
+					}
+					//! value
+					const auto length_varint_size = GetVarintSize(entry.length);
+					const auto child_offset_varint_size =
+						length_varint_size ? GetVarintSize(children_offset_data[result_index]) : 0;
+					if (WRITE_DATA) {
+						auto &blob_value = result.blob_data[result_index];
+						auto blob_value_data = data_ptr_cast(blob_value.GetDataWriteable());
+
+						VarintEncode(entry.length, blob_value_data + blob_offset);
+						if (entry.length) {
+							VarintEncode(children_offset_data[result_index],
+										blob_value_data + blob_offset + length_varint_size);
+						}
+					}
+					blob_offset += length_varint_size + child_offset_varint_size;
+
+					auto children_offset = children_list_entry.offset + children_offset_data[result_index];
+					for (idx_t child_idx = 0; child_idx < entry.length; child_idx++) {
+						//! Set up the selection vector for the child of the list vector
+						new_selection.set_index(child_idx + entry.offset, result_index);
+						if (WRITE_DATA) {
+							children_selection.set_index(child_idx + entry.offset, children_offset + child_idx);
+							result.key_id_validity.SetInvalid(children_offset + child_idx);
+						}
+					}
+					children_offset_data[result_index] += entry.length;
+				} else {
+					if (WRITE_DATA) {
+						//! type_id + byte_offset
+						auto values_offset = values_list_entry.offset + values_offset_data[result_index];
+						result.type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::VARIANT_NULL);
+						result.byte_offset_data[values_offset] = blob_offset;
+						if (value_ids_selvec) {
+							//! Set for the parent where this child lives in the 'values' list
+							result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
+						}
 					}
 				}
 
-				//! children
-				children_offset_data[result_index] += entry.length;
+				values_offset_data[result_index]++;
 			}
 			//! Now write the child vector of the list (for all rows)
 			auto &entry = ListVector::GetEntry(source);
 			ConvertToVariant<WRITE_DATA>(entry, result, offsets, list_size, &new_selection, keys_selvec, dictionary,
 			                             &children_selection);
-		} else if (physical_type == PhysicalType::STRUCT) {
+			break;
+		}
+		case LogicalTypeId::STRUCT: {
 			auto &children = StructVector::GetEntries(source);
 			auto &struct_children = StructType::GetChildTypes(type);
 
@@ -466,9 +480,11 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 					}
 				}
 			}
-		} else {
-			throw NotImplementedException("Can't convert nested physical type '%s'", EnumUtil::ToString(physical_type));
+			break;
 		}
+		default:
+			throw NotImplementedException("Can't convert nested type '%s'", EnumUtil::ToString(logical_type));
+		};
 	} else {
 		switch (type.id()) {
 		case LogicalTypeId::BOOLEAN:

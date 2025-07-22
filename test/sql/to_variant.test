@@ -69,3 +69,8 @@ query I
 select to_variant(['test', null, 'hello this is a big string', null])::JSON;
 ----
 ["test",null,"hello this is a big string",null]
+
+query I
+select to_variant([['test', null], [], null, [], ['hello this is a big string', null], null])::JSON;
+----
+[["test",null],[],null,[],["hello this is a big string",null],null]
