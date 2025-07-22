@@ -59,3 +59,13 @@ select to_variant(var)::JSON from tbl;
 {"test":123,"hello":[1,2,3],"world":{"test":true}}
 {"test":123,"hello":[4,5,6],"world":{"test":true}}
 {"test":123,"hello":[],"world":{"test":true}}
+
+query I
+select to_variant(['test', null, 'hello this is a big string', null]);
+----
+{'keys': [], 'children': [{'key_id': NULL, 'value_id': 1}, {'key_id': NULL, 'value_id': 2}, {'key_id': NULL, 'value_id': 3}, {'key_id': NULL, 'value_id': 4}], 'values': [{'type_id': 30, 'byte_offset': 0}, {'type_id': 16, 'byte_offset': 2}, {'type_id': 0, 'byte_offset': 7}, {'type_id': 16, 'byte_offset': 7}, {'type_id': 0, 'byte_offset': 34}], 'data': \x04\x00\x04test\x1Ahello this is a big string}
+
+query I
+select to_variant(['test', null, 'hello this is a big string', null])::JSON;
+----
+["test",null,"hello this is a big string",null]

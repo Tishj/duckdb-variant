@@ -243,6 +243,7 @@ static bool ConvertPrimitiveToVariant(Vector &source, VariantVectorData &result,
 
 	UnifiedVectorFormat source_format;
 	source.ToUnifiedFormat(count, source_format);
+	auto &source_validity = source_format.validity;
 	auto source_data = source_format.GetData<T>(source_format);
 	for (idx_t i = 0; i < count; i++) {
 		auto index = source_format.sel->get_index(i);
@@ -251,31 +252,46 @@ static bool ConvertPrimitiveToVariant(Vector &source, VariantVectorData &result,
 		auto &blob_offset = blob_offset_data[result_index];
 		auto &values_list_entry = result.values_data[result_index];
 
-		auto &val = source_data[index];
 		vector<idx_t> lengths;
-		if (TYPE_ID == VariantLogicalType::DECIMAL) {
-			GetDecimalValueSize<T>(val, lengths, width, scale);
-		} else {
-			GetValueSize<T>(val, lengths);
-		}
 
-		if (WRITE_DATA) {
-			auto &blob_value = result.blob_data[result_index];
-			auto blob_value_data = data_ptr_cast(blob_value.GetDataWriteable());
-
-			auto values_offset = values_list_entry.offset + values_offset_data[result_index];
-			result.type_ids_data[values_offset] = static_cast<uint8_t>(GetTypeId<T, TYPE_ID>(val));
-			result.byte_offset_data[values_offset] = blob_offset;
-			if (value_ids_selvec) {
-				//! Set for the parent where this child lives in the 'values' list
-				result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
-			}
+		if (source_validity.RowIsValid(index)) {
+			//! Write the value
+			auto &val = source_data[index];
 			if (TYPE_ID == VariantLogicalType::DECIMAL) {
-				WriteDecimalData<T>(blob_value_data + blob_offset, val, lengths, width, scale);
+				GetDecimalValueSize<T>(val, lengths, width, scale);
 			} else {
-				WriteData<T>(blob_value_data + blob_offset, val, lengths);
+				GetValueSize<T>(val, lengths);
+			}
+
+			if (WRITE_DATA) {
+				auto &blob_value = result.blob_data[result_index];
+				auto blob_value_data = data_ptr_cast(blob_value.GetDataWriteable());
+
+				auto values_offset = values_list_entry.offset + values_offset_data[result_index];
+				result.type_ids_data[values_offset] = static_cast<uint8_t>(GetTypeId<T, TYPE_ID>(val));
+				result.byte_offset_data[values_offset] = blob_offset;
+				if (value_ids_selvec) {
+					//! Set for the parent where this child lives in the 'values' list
+					result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
+				}
+				if (TYPE_ID == VariantLogicalType::DECIMAL) {
+					WriteDecimalData<T>(blob_value_data + blob_offset, val, lengths, width, scale);
+				} else {
+					WriteData<T>(blob_value_data + blob_offset, val, lengths);
+				}
+			}
+		} else {
+			if (WRITE_DATA) {
+				auto values_offset = values_list_entry.offset + values_offset_data[result_index];
+				result.type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::VARIANT_NULL);
+				result.byte_offset_data[values_offset] = blob_offset;
+				if (value_ids_selvec) {
+					//! Set for the parent where this child lives in the 'values' list
+					result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
+				}
 			}
 		}
+
 		for (auto &length : lengths) {
 			blob_offset += length;
 		}
