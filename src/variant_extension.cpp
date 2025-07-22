@@ -6,7 +6,6 @@
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/function/scalar_function.hpp"
-#include "duckdb/main/extension_util.hpp"
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
 
 namespace duckdb {
@@ -45,50 +44,33 @@ static unique_ptr<FunctionData> ToVariantBind(ClientContext &context, ScalarFunc
 	return nullptr;
 }
 
-static void LoadInternal(DatabaseInstance &instance) {
+static void LoadInternal(ExtensionLoader &loader) {
 	// add the "variant" type
 	auto variant_type = CreateVariantType();
-	ExtensionUtil::RegisterType(instance, VARIANT_TYPE_NAME, variant_type);
+	loader.RegisterType(VARIANT_TYPE_NAME, variant_type);
 
 	// add the casts to and from VARIANT type
-	ExtensionUtil::RegisterCastFunction(instance, LogicalType::JSON(), variant_type,
+	loader.RegisterCastFunction(LogicalType::JSON(), variant_type,
 	                                    VariantFunctions::CastJSONToVARIANT);
-	ExtensionUtil::RegisterCastFunction(instance, variant_type, LogicalType::JSON(),
+	loader.RegisterCastFunction(variant_type, LogicalType::JSON(),
 	                                    VariantFunctions::CastVARIANTToJSON);
 	ScalarFunction to_variant_func("to_variant", {LogicalType::ANY}, variant_type, ToVariantFunction);
 	to_variant_func.bind = ToVariantBind;
-	ExtensionUtil::RegisterFunction(instance, to_variant_func);
+	loader.RegisterFunction(to_variant_func);
 }
 
-void VariantExtension::Load(DuckDB &db) {
-	LoadInternal(*db.instance);
+void VariantExtension::Load(ExtensionLoader &db) {
+	LoadInternal(db);
 }
-std::string VariantExtension::Name() {
+string VariantExtension::Name() {
 	return "variant";
-}
-
-std::string VariantExtension::Version() const {
-#ifdef EXT_VERSION_VARIANT
-	return EXT_VERSION_VARIANT;
-#else
-	return "";
-#endif
 }
 
 } // namespace duckdb
 
 extern "C" {
 
-DUCKDB_EXTENSION_API void variant_init(duckdb::DatabaseInstance &db) {
-	duckdb::DuckDB db_wrapper(db);
-	db_wrapper.LoadExtension<duckdb::VariantExtension>();
-}
-
-DUCKDB_EXTENSION_API const char *variant_version() {
-	return duckdb::DuckDB::LibraryVersion();
+DUCKDB_CPP_EXTENSION_ENTRY(variant, loader) {
+	LoadInternal(loader);
 }
 }
-
-#ifndef DUCKDB_EXTENSION_MAIN
-#error DUCKDB_EXTENSION_MAIN not defined
-#endif
