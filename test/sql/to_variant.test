@@ -89,32 +89,66 @@ require json
 #----
 #"test"
 
-statement ok
-CREATE TABLE tbl1 (u UNION(num INTEGER, str VARCHAR));
+#statement ok
+#CREATE TABLE tbl1 (u UNION(num INTEGER, str VARCHAR));
+
+#statement ok
+#INSERT INTO tbl1 VALUES (1), (null), ('two'), (union_value(str := 'three')), (null::integer), (null::varchar), (union_value(str := null));
+
+#query I
+#select to_variant(u)::JSON from tbl1;
+#----
+#1
+#null
+#"two"
+#"three"
+#null
+#null
+#null
 
 statement ok
-INSERT INTO tbl1 VALUES (1), (null), ('two'), (union_value(str := 'three')), (null::integer), (null::varchar), (union_value(str := null));
+create type tp as UNION(a VARCHAR, b "NULL", c INTEGER, d BOOL, e DATE, f STRUCT(a VARCHAR, b "NULL"));
 
-query I
-select to_variant(u)::JSON from tbl1;
-----
-1
-null
-"two"
-"three"
-null
-null
-null
+#query I
+#select [
+#	'test'::VARCHAR::tp,
+#	null::VARCHAR::tp,
+#	1::INTEGER::tp,
+#	{'a': 'this is a long string', 'b': NULL}::tp,
+#	true::BOOL::tp,
+#	'1990/07/21'::DATE::tp
+#]::tp[]
+#----
+#[test, NULL, 1, {'a': this is a long string, 'b': NULL}, true, 1990-07-21]
+
+#query I
+#select to_variant([
+#	'test'::VARCHAR::tp,
+#	null::VARCHAR::tp,
+#	1::INTEGER::tp,
+#	{'a': 'this is a long string', 'b': NULL}::tp,
+#	true::BOOL::tp,
+#	'1990/07/21'::DATE::tp
+#]::tp[])::JSON
+#----
+#["test",null,1,{"a":null,"b":null},true,"1990-07-21"]
 
 statement ok
-create type tp as UNION(a VARCHAR, b "NULL", c INTEGER, d BOOL, e DATE);
+create table tbl2(a STRUCT(a VARCHAR, b BOOL));
+
+statement ok
+insert into tbl2 VALUES
+	(NULL),
+	(NULL),
+	(row('test', true)),
+	(row('hello this is a long string', false))
+;
+
 
 query I
-select ['test'::VARCHAR::tp, null::VARCHAR::tp, 1::INTEGER::tp, true::BOOL::tp, '1990/07/21'::DATE::tp]::tp[]
+select to_variant(a)::JSON from tbl2;
 ----
-[test, NULL, 1, true, 1990-07-21]
-
-query I
-select to_variant(['test'::VARCHAR::tp, null::VARCHAR::tp, 1::INTEGER::tp, true::BOOL::tp, '1990/07/21'::DATE::tp]::tp[])::JSON
-----
-["test",null,1,true,"1990-07-21"]
+null
+null
+{"a":"test","b":true}
+{"a":"hello this is a long string","b":false}

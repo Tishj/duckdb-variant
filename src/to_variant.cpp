@@ -479,7 +479,11 @@ static bool ConvertStructToVariant(Vector &source, VariantVectorData &result, Da
 		}
 	}
 
+	idx_t child_count = 0;
 	SelectionVector children_selection(0, count);
+	//! Create a selection vector that maps to the right row in the 'result' for the child vector
+	SelectionVector new_selection(0, count);
+	SelectionVector non_null_selection(0, count);
 	for (idx_t i = 0; i < count; i++) {
 		auto index = source_format.sel->get_index(i);
 		auto result_index = selvec ? selvec->get_index(i) : i;
@@ -522,11 +526,14 @@ static bool ConvertStructToVariant(Vector &source, VariantVectorData &result, Da
 					keys_selvec.set_index(keys_offset + child_idx, dictionary_indices[child_idx]);
 				}
 				//! Map from index of the child to the children.value_ids of the parent
-				children_selection.set_index(i, children_offset);
+				children_selection.set_index(child_count, children_offset);
 			}
+			non_null_selection.set_index(child_count, i);
+			new_selection.set_index(child_count, result_index);
 			children_offset_data[result_index] += children.size();
 			keys_offset_data[result_index] += children.size();
 			values_offset_data[result_index]++;
+			child_count++;
 		} else if (!IGNORE_NULLS) {
 			if (WRITE_DATA) {
 				//! type_id + byte_offset
@@ -542,16 +549,29 @@ static bool ConvertStructToVariant(Vector &source, VariantVectorData &result, Da
 		}
 	}
 
+
 	for (auto &child_ptr : children) {
 		auto &child = *child_ptr;
 
-		if (!ConvertToVariant<WRITE_DATA>(child, result, offsets, count, selvec, keys_selvec, dictionary,
-		                                  &children_selection)) {
-			return false;
+		//! FIXME: do we need a "total_length" parameter to the ConvertToVariant function,
+		//! so the ToUnifiedFormat(...) receives the correct size?
+		if (child_count != count) {
+			//! Some of the STRUCT rows are NULL entirely, we have to filter these rows out of the children
+			Vector new_child(child.GetType(), nullptr);
+			new_child.Dictionary(child, count, non_null_selection, child_count);
+			if (!ConvertToVariant<WRITE_DATA>(new_child, result, offsets, child_count, &new_selection, keys_selvec, dictionary,
+											&children_selection)) {
+				return false;
+			}
+		} else {
+			if (!ConvertToVariant<WRITE_DATA>(child, result, offsets, child_count, &new_selection, keys_selvec, dictionary,
+											&children_selection)) {
+				return false;
+			}
 		}
 		if (WRITE_DATA) {
 			//! Now forward the selection to point to the next index in the children.value_ids
-			for (idx_t i = 0; i < count; i++) {
+			for (idx_t i = 0; i < child_count; i++) {
 				children_selection[i]++;
 			}
 		}
