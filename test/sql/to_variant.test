@@ -8,12 +8,12 @@ require json
 query I
 select to_variant('test')
 ----
-{'keys': [], 'children': [], 'values': [{'type_id': 16, 'byte_offset': 0}], 'data': \x04test}
+test
 
 query I
 select to_variant(['test', 'hello', 'world'])
 ----
-{'keys': [], 'children': [{'key_id': NULL, 'value_id': 1}, {'key_id': NULL, 'value_id': 2}, {'key_id': NULL, 'value_id': 3}], 'values': [{'type_id': 30, 'byte_offset': 0}, {'type_id': 16, 'byte_offset': 2}, {'type_id': 16, 'byte_offset': 7}, {'type_id': 16, 'byte_offset': 13}], 'data': \x03\x00\x04test\x05hello\x05world}
+[test, hello, world]
 
 query I
 select to_variant(['test', 'hello', 'world'])::JSON
@@ -21,14 +21,9 @@ select to_variant(['test', 'hello', 'world'])::JSON
 ["test","hello","world"]
 
 query I
-select to_variant(['test', 'hello', 'world'])
-----
-{'keys': [], 'children': [{'key_id': NULL, 'value_id': 1}, {'key_id': NULL, 'value_id': 2}, {'key_id': NULL, 'value_id': 3}], 'values': [{'type_id': 30, 'byte_offset': 0}, {'type_id': 16, 'byte_offset': 2}, {'type_id': 16, 'byte_offset': 7}, {'type_id': 16, 'byte_offset': 13}], 'data': \x03\x00\x04test\x05hello\x05world}
-
-query I
 select to_variant({'test': 123, 'hello': [1,2,3], 'world': {'test': true}})
 ----
-{'keys': [test, hello, world, test], 'children': [{'key_id': 0, 'value_id': 1}, {'key_id': 1, 'value_id': 2}, {'key_id': 2, 'value_id': 6}, {'key_id': NULL, 'value_id': 3}, {'key_id': NULL, 'value_id': 4}, {'key_id': NULL, 'value_id': 5}, {'key_id': 3, 'value_id': 7}], 'values': [{'type_id': 29, 'byte_offset': 0}, {'type_id': 5, 'byte_offset': 2}, {'type_id': 30, 'byte_offset': 6}, {'type_id': 5, 'byte_offset': 8}, {'type_id': 5, 'byte_offset': 12}, {'type_id': 5, 'byte_offset': 16}, {'type_id': 29, 'byte_offset': 20}, {'type_id': 1, 'byte_offset': 22}], 'data': '\\x03\\x00{\\x00\\x00\\x00\\x03\\x03\\x01\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x03\\x00\\x00\\x00\\x01\\x06'}
+{'test': 123, 'hello': [1, 2, 3], 'world': {'test': true}}
 
 query I
 select to_variant({'test': 123, 'hello': [1,2,3], 'world': {'test': true}})::JSON from range(3)
@@ -49,9 +44,9 @@ insert into tbl select {'test': 123, 'hello': [], 'world': {'test': true}};
 query I
 select to_variant(var) from tbl;
 ----
-{'keys': [test, hello, world, test], 'children': [{'key_id': 0, 'value_id': 1}, {'key_id': 1, 'value_id': 2}, {'key_id': 2, 'value_id': 6}, {'key_id': NULL, 'value_id': 3}, {'key_id': NULL, 'value_id': 4}, {'key_id': NULL, 'value_id': 5}, {'key_id': 3, 'value_id': 7}], 'values': [{'type_id': 29, 'byte_offset': 0}, {'type_id': 5, 'byte_offset': 2}, {'type_id': 30, 'byte_offset': 6}, {'type_id': 5, 'byte_offset': 8}, {'type_id': 5, 'byte_offset': 12}, {'type_id': 5, 'byte_offset': 16}, {'type_id': 29, 'byte_offset': 20}, {'type_id': 1, 'byte_offset': 22}], 'data': '\\x03\\x00{\\x00\\x00\\x00\\x03\\x03\\x01\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x03\\x00\\x00\\x00\\x01\\x06'}
-{'keys': [test, hello, world, test], 'children': [{'key_id': 0, 'value_id': 1}, {'key_id': 1, 'value_id': 2}, {'key_id': 2, 'value_id': 6}, {'key_id': NULL, 'value_id': 3}, {'key_id': NULL, 'value_id': 4}, {'key_id': NULL, 'value_id': 5}, {'key_id': 3, 'value_id': 7}], 'values': [{'type_id': 29, 'byte_offset': 0}, {'type_id': 5, 'byte_offset': 2}, {'type_id': 30, 'byte_offset': 6}, {'type_id': 5, 'byte_offset': 8}, {'type_id': 5, 'byte_offset': 12}, {'type_id': 5, 'byte_offset': 16}, {'type_id': 29, 'byte_offset': 20}, {'type_id': 1, 'byte_offset': 22}], 'data': '\\x03\\x00{\\x00\\x00\\x00\\x03\\x03\\x04\\x00\\x00\\x00\\x05\\x00\\x00\\x00\\x06\\x00\\x00\\x00\\x01\\x06'}
-{'keys': [test, hello, world, test], 'children': [{'key_id': 0, 'value_id': 1}, {'key_id': 1, 'value_id': 2}, {'key_id': 2, 'value_id': 3}, {'key_id': 3, 'value_id': 4}], 'values': [{'type_id': 29, 'byte_offset': 0}, {'type_id': 5, 'byte_offset': 2}, {'type_id': 30, 'byte_offset': 6}, {'type_id': 29, 'byte_offset': 8}, {'type_id': 1, 'byte_offset': 10}], 'data': '\\x03\\x00{\\x00\\x00\\x00\\x00\\x00\\x01\\x03'}
+{'test': 123, 'hello': [1, 2, 3], 'world': {'test': true}}
+{'test': 123, 'hello': [4, 5, 6], 'world': {'test': true}}
+{'test': 123, 'hello': [], 'world': {'test': true}}
 
 query I
 select to_variant(var)::JSON from tbl;
@@ -64,7 +59,7 @@ select to_variant(var)::JSON from tbl;
 query I
 select to_variant(['test', null, 'hello this is a big string', null]);
 ----
-{'keys': [], 'children': [{'key_id': NULL, 'value_id': 1}, {'key_id': NULL, 'value_id': 2}, {'key_id': NULL, 'value_id': 3}, {'key_id': NULL, 'value_id': 4}], 'values': [{'type_id': 30, 'byte_offset': 0}, {'type_id': 16, 'byte_offset': 2}, {'type_id': 0, 'byte_offset': 7}, {'type_id': 16, 'byte_offset': 7}, {'type_id': 0, 'byte_offset': 34}], 'data': \x04\x00\x04test\x1Ahello this is a big string}
+[test, NULL, hello this is a big string, NULL]
 
 query I
 select to_variant(['test', null, 'hello this is a big string', null])::JSON;
