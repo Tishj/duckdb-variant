@@ -481,10 +481,13 @@ static bool ConvertListToVariant(Vector &source, VariantVectorData &result, Data
 	auto source_data = source_format.GetData<list_entry_t>(source_format);
 
 	auto list_size = ListVector::GetListSize(source);
+
+	idx_t child_count = 0;
 	//! Create a selection vector that maps to the right row in the 'result' for the child vector
 	SelectionVector new_selection(0, list_size);
 	//! Create a selection vector that maps to the children.value_id entry of the parent
 	SelectionVector children_selection(0, list_size);
+	SelectionVector non_null_selection(0, list_size);
 	for (idx_t i = 0; i < count; i++) {
 		const auto index = source_format.sel->get_index(i);
 		const auto result_index = selvec ? selvec->get_index(i) : i;
@@ -525,14 +528,16 @@ static bool ConvertListToVariant(Vector &source, VariantVectorData &result, Data
 			auto children_offset = children_list_entry.offset + children_offset_data[result_index];
 			for (idx_t child_idx = 0; child_idx < entry.length; child_idx++) {
 				//! Set up the selection vector for the child of the list vector
-				new_selection.set_index(child_idx + entry.offset, result_index);
+				new_selection.set_index(child_idx + child_count, result_index);
 				if (WRITE_DATA) {
-					children_selection.set_index(child_idx + entry.offset, children_offset + child_idx);
+					children_selection.set_index(child_idx + child_count, children_offset + child_idx);
 					result.key_id_validity.SetInvalid(children_offset + child_idx);
 				}
+				non_null_selection.set_index(child_count + child_idx, child_idx + entry.offset);
 			}
 			children_offset_data[result_index] += entry.length;
 			values_offset_data[result_index]++;
+			child_count += entry.length;
 		} else if (!IGNORE_NULLS) {
 			if (WRITE_DATA) {
 				//! type_id + byte_offset
@@ -549,8 +554,14 @@ static bool ConvertListToVariant(Vector &source, VariantVectorData &result, Data
 	}
 	//! Now write the child vector of the list (for all rows)
 	auto &entry = ListVector::GetEntry(source);
-	return ConvertToVariant<WRITE_DATA, false>(entry, result, offsets, list_size, &new_selection, keys_selvec,
-	                                           dictionary, &children_selection);
+	if (child_count != list_size) {
+		Vector sliced_entry(entry.GetType(), nullptr);
+		sliced_entry.Dictionary(entry, list_size, non_null_selection, child_count);
+		return ConvertToVariant<WRITE_DATA, false>(sliced_entry, result, offsets, child_count, &new_selection, keys_selvec, dictionary, &children_selection);
+	} else {
+		//! All rows are valid, no need to slice the child
+		return ConvertToVariant<WRITE_DATA, false>(entry, result, offsets, child_count, &new_selection, keys_selvec, dictionary, &children_selection);
+	}
 }
 
 template <bool WRITE_DATA, bool IGNORE_NULLS>
@@ -650,8 +661,8 @@ static bool ConvertStructToVariant(Vector &source, VariantVectorData &result, Da
 		}
 	}
 
-	for (auto &child_ptr : children) {
-		auto &child = *child_ptr;
+	for (idx_t child_idx = 0; child_idx < children.size(); child_idx++) {
+		auto &child = *children[child_idx];
 
 		//! FIXME: do we need a "total_length" parameter to the ConvertToVariant function,
 		//! so the ToUnifiedFormat(...) receives the correct size?
@@ -884,8 +895,7 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 		}
 		case LogicalTypeId::VARCHAR:
 		case LogicalTypeId::CHAR:
-			return ConvertPrimitiveToVariant<WRITE_DATA, IGNORE_NULLS, VariantLogicalType::VARCHAR, string_t>(
-			    source, result, offsets, count, selvec, value_ids_selvec, empty_payload);
+			return ConvertPrimitiveToVariant<WRITE_DATA, IGNORE_NULLS, VariantLogicalType::VARCHAR, string_t>(source, result, offsets, count, selvec, value_ids_selvec, empty_payload);
 		case LogicalTypeId::BLOB:
 			return ConvertPrimitiveToVariant<WRITE_DATA, IGNORE_NULLS, VariantLogicalType::BLOB, string_t>(
 			    source, result, offsets, count, selvec, value_ids_selvec, empty_payload);
@@ -912,8 +922,9 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 				                              EnumUtil::ToString(physical_type));
 			}
 		}
-		case LogicalTypeId::BIT:
+		//! TODO: we need to cast this to a string representation and then store it as VARCHAR
 		case LogicalTypeId::VARINT:
+		case LogicalTypeId::BIT:
 		default:
 			throw NotImplementedException("Invalid LogicalType (%s) for ConvertToVariant",
 			                              EnumUtil::ToString(logical_type));

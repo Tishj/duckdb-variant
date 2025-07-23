@@ -7,6 +7,8 @@
 #include "duckdb/common/string_map_set.hpp"
 #include "duckdb/common/types/selection_vector.hpp"
 #include "duckdb/common/types/decimal.hpp"
+#include "duckdb/common/types/time.hpp"
+#include "duckdb/common/types/timestamp.hpp"
 
 using namespace duckdb_yyjson; // NOLINT
 
@@ -489,6 +491,11 @@ yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat
 		auto val = Load<int64_t>(ptr);
 		return yyjson_mut_sint(doc, val);
 	}
+	case VariantLogicalType::INT128: {
+		auto val = Load<hugeint_t>(ptr);
+		auto val_str = val.ToString();
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
 	case VariantLogicalType::UINT8: {
 		auto val = Load<uint8_t>(ptr);
 		return yyjson_mut_sint(doc, val);
@@ -505,6 +512,25 @@ yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat
 		auto val = Load<uint64_t>(ptr);
 		return yyjson_mut_uint(doc, val);
 	}
+	case VariantLogicalType::UINT128: {
+		auto val = Load<uhugeint_t>(ptr);
+		auto val_str = val.ToString();
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::UUID: {
+		auto val = Value::UUID(Load<hugeint_t>(ptr));
+		auto val_str = val.ToString();
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::INTERVAL: {
+		auto val = Value::INTERVAL(Load<interval_t>(ptr));
+		auto val_str = val.ToString();
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::FLOAT: {
+		auto val = Load<float>(ptr);
+		return yyjson_mut_real(doc, val);
+	}
 	case VariantLogicalType::DOUBLE: {
 		auto val = Load<double>(ptr);
 		return yyjson_mut_real(doc, val);
@@ -514,6 +540,7 @@ yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat
 		auto val_str = Date::ToString(date_t(val));
 		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
 	}
+	case VariantLogicalType::BLOB:
 	case VariantLogicalType::VARCHAR: {
 		auto string_length = VarintDecode<uint32_t>(ptr);
 		auto string_data = reinterpret_cast<const char *>(ptr);
@@ -533,6 +560,41 @@ yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat
 		} else {
 			val_str = Decimal::ToString(Load<int16_t>(ptr), width, scale);
 		}
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::TIME_MICROS: {
+		auto val = Load<dtime_t>(ptr);
+		auto val_str = Time::ToString(val);
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::TIME_MICROS_TZ: {
+		auto val = Value::TIMETZ(Load<dtime_tz_t>(ptr));
+		auto val_str = val.ToString();
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::TIMESTAMP_MICROS: {
+		auto val = Load<timestamp_t>(ptr);
+		auto val_str = Timestamp::ToString(val);
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::TIMESTAMP_SEC: {
+		auto val = Value::TIMESTAMPSEC(Load<timestamp_sec_t>(ptr));
+		auto val_str = val.ToString();
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::TIMESTAMP_NANOS: {
+		auto val = Value::TIMESTAMPNS(Load<timestamp_ns_t>(ptr));
+		auto val_str = val.ToString();
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::TIMESTAMP_MILIS: {
+		auto val = Value::TIMESTAMPMS(Load<timestamp_ms_t>(ptr));
+		auto val_str = val.ToString();
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::TIMESTAMP_MICROS_TZ: {
+		auto val = Value::TIMESTAMPTZ(Load<timestamp_tz_t>(ptr));
+		auto val_str = val.ToString();
 		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
 	}
 	case VariantLogicalType::ARRAY: {
