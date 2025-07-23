@@ -5,133 +5,133 @@ require variant
 
 require json
 
-#query I
-#select to_variant('test')
-#----
-#{'keys': [], 'children': [], 'values': [{'type_id': 16, 'byte_offset': 0}], 'data': \x04test}
+query I
+select to_variant('test')
+----
+{'keys': [], 'children': [], 'values': [{'type_id': 16, 'byte_offset': 0}], 'data': \x04test}
 
-#query I
-#select to_variant(['test', 'hello', 'world'])
-#----
-#{'keys': [], 'children': [{'key_id': NULL, 'value_id': 1}, {'key_id': NULL, 'value_id': 2}, {'key_id': NULL, 'value_id': 3}], 'values': [{'type_id': 30, 'byte_offset': 0}, {'type_id': 16, 'byte_offset': 2}, {'type_id': 16, 'byte_offset': 7}, {'type_id': 16, 'byte_offset': 13}], 'data': \x03\x00\x04test\x05hello\x05world}
+query I
+select to_variant(['test', 'hello', 'world'])
+----
+{'keys': [], 'children': [{'key_id': NULL, 'value_id': 1}, {'key_id': NULL, 'value_id': 2}, {'key_id': NULL, 'value_id': 3}], 'values': [{'type_id': 30, 'byte_offset': 0}, {'type_id': 16, 'byte_offset': 2}, {'type_id': 16, 'byte_offset': 7}, {'type_id': 16, 'byte_offset': 13}], 'data': \x03\x00\x04test\x05hello\x05world}
 
-#query I
-#select to_variant(['test', 'hello', 'world'])::JSON
-#----
-#["test","hello","world"]
+query I
+select to_variant(['test', 'hello', 'world'])::JSON
+----
+["test","hello","world"]
 
-#query I
-#select to_variant(['test', 'hello', 'world'])
-#----
-#{'keys': [], 'children': [{'key_id': NULL, 'value_id': 1}, {'key_id': NULL, 'value_id': 2}, {'key_id': NULL, 'value_id': 3}], 'values': [{'type_id': 30, 'byte_offset': 0}, {'type_id': 16, 'byte_offset': 2}, {'type_id': 16, 'byte_offset': 7}, {'type_id': 16, 'byte_offset': 13}], 'data': \x03\x00\x04test\x05hello\x05world}
+query I
+select to_variant(['test', 'hello', 'world'])
+----
+{'keys': [], 'children': [{'key_id': NULL, 'value_id': 1}, {'key_id': NULL, 'value_id': 2}, {'key_id': NULL, 'value_id': 3}], 'values': [{'type_id': 30, 'byte_offset': 0}, {'type_id': 16, 'byte_offset': 2}, {'type_id': 16, 'byte_offset': 7}, {'type_id': 16, 'byte_offset': 13}], 'data': \x03\x00\x04test\x05hello\x05world}
 
-#query I
-#select to_variant({'test': 123, 'hello': [1,2,3], 'world': {'test': true}})
-#----
-#{'keys': [test, hello, world, test], 'children': [{'key_id': 0, 'value_id': 1}, {'key_id': 1, 'value_id': 2}, {'key_id': 2, 'value_id': 6}, {'key_id': NULL, 'value_id': 3}, {'key_id': NULL, 'value_id': 4}, {'key_id': NULL, 'value_id': 5}, {'key_id': 3, 'value_id': 7}], 'values': [{'type_id': 29, 'byte_offset': 0}, {'type_id': 5, 'byte_offset': 2}, {'type_id': 30, 'byte_offset': 6}, {'type_id': 5, 'byte_offset': 8}, {'type_id': 5, 'byte_offset': 12}, {'type_id': 5, 'byte_offset': 16}, {'type_id': 29, 'byte_offset': 20}, {'type_id': 1, 'byte_offset': 22}], 'data': '\\x03\\x00{\\x00\\x00\\x00\\x03\\x03\\x01\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x03\\x00\\x00\\x00\\x01\\x06'}
+query I
+select to_variant({'test': 123, 'hello': [1,2,3], 'world': {'test': true}})
+----
+{'keys': [test, hello, world, test], 'children': [{'key_id': 0, 'value_id': 1}, {'key_id': 1, 'value_id': 2}, {'key_id': 2, 'value_id': 6}, {'key_id': NULL, 'value_id': 3}, {'key_id': NULL, 'value_id': 4}, {'key_id': NULL, 'value_id': 5}, {'key_id': 3, 'value_id': 7}], 'values': [{'type_id': 29, 'byte_offset': 0}, {'type_id': 5, 'byte_offset': 2}, {'type_id': 30, 'byte_offset': 6}, {'type_id': 5, 'byte_offset': 8}, {'type_id': 5, 'byte_offset': 12}, {'type_id': 5, 'byte_offset': 16}, {'type_id': 29, 'byte_offset': 20}, {'type_id': 1, 'byte_offset': 22}], 'data': '\\x03\\x00{\\x00\\x00\\x00\\x03\\x03\\x01\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x03\\x00\\x00\\x00\\x01\\x06'}
 
-#query I
-#select to_variant({'test': 123, 'hello': [1,2,3], 'world': {'test': true}})::JSON from range(3)
-#----
-#{"test":123,"hello":[1,2,3],"world":{"test":true}}
-#{"test":123,"hello":[1,2,3],"world":{"test":true}}
-#{"test":123,"hello":[1,2,3],"world":{"test":true}}
+query I
+select to_variant({'test': 123, 'hello': [1,2,3], 'world': {'test': true}})::JSON from range(3)
+----
+{"test":123,"hello":[1,2,3],"world":{"test":true}}
+{"test":123,"hello":[1,2,3],"world":{"test":true}}
+{"test":123,"hello":[1,2,3],"world":{"test":true}}
 
-#statement ok
-#create table tbl as select {'test': 123, 'hello': [1,2,3], 'world': {'test': true}} var;
+statement ok
+create table tbl as select {'test': 123, 'hello': [1,2,3], 'world': {'test': true}} var;
 
-#statement ok
-#insert into tbl select {'test': 123, 'hello': [4,5,6], 'world': {'test': true}};
+statement ok
+insert into tbl select {'test': 123, 'hello': [4,5,6], 'world': {'test': true}};
 
-#statement ok
-#insert into tbl select {'test': 123, 'hello': [], 'world': {'test': true}};
+statement ok
+insert into tbl select {'test': 123, 'hello': [], 'world': {'test': true}};
 
-#query I
-#select to_variant(var) from tbl;
-#----
-#{'keys': [test, hello, world, test], 'children': [{'key_id': 0, 'value_id': 1}, {'key_id': 1, 'value_id': 2}, {'key_id': 2, 'value_id': 6}, {'key_id': NULL, 'value_id': 3}, {'key_id': NULL, 'value_id': 4}, {'key_id': NULL, 'value_id': 5}, {'key_id': 3, 'value_id': 7}], 'values': [{'type_id': 29, 'byte_offset': 0}, {'type_id': 5, 'byte_offset': 2}, {'type_id': 30, 'byte_offset': 6}, {'type_id': 5, 'byte_offset': 8}, {'type_id': 5, 'byte_offset': 12}, {'type_id': 5, 'byte_offset': 16}, {'type_id': 29, 'byte_offset': 20}, {'type_id': 1, 'byte_offset': 22}], 'data': '\\x03\\x00{\\x00\\x00\\x00\\x03\\x03\\x01\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x03\\x00\\x00\\x00\\x01\\x06'}
-#{'keys': [test, hello, world, test], 'children': [{'key_id': 0, 'value_id': 1}, {'key_id': 1, 'value_id': 2}, {'key_id': 2, 'value_id': 6}, {'key_id': NULL, 'value_id': 3}, {'key_id': NULL, 'value_id': 4}, {'key_id': NULL, 'value_id': 5}, {'key_id': 3, 'value_id': 7}], 'values': [{'type_id': 29, 'byte_offset': 0}, {'type_id': 5, 'byte_offset': 2}, {'type_id': 30, 'byte_offset': 6}, {'type_id': 5, 'byte_offset': 8}, {'type_id': 5, 'byte_offset': 12}, {'type_id': 5, 'byte_offset': 16}, {'type_id': 29, 'byte_offset': 20}, {'type_id': 1, 'byte_offset': 22}], 'data': '\\x03\\x00{\\x00\\x00\\x00\\x03\\x03\\x04\\x00\\x00\\x00\\x05\\x00\\x00\\x00\\x06\\x00\\x00\\x00\\x01\\x06'}
-#{'keys': [test, hello, world, test], 'children': [{'key_id': 0, 'value_id': 1}, {'key_id': 1, 'value_id': 2}, {'key_id': 2, 'value_id': 3}, {'key_id': 3, 'value_id': 4}], 'values': [{'type_id': 29, 'byte_offset': 0}, {'type_id': 5, 'byte_offset': 2}, {'type_id': 30, 'byte_offset': 6}, {'type_id': 29, 'byte_offset': 8}, {'type_id': 1, 'byte_offset': 10}], 'data': '\\x03\\x00{\\x00\\x00\\x00\\x00\\x00\\x01\\x03'}
+query I
+select to_variant(var) from tbl;
+----
+{'keys': [test, hello, world, test], 'children': [{'key_id': 0, 'value_id': 1}, {'key_id': 1, 'value_id': 2}, {'key_id': 2, 'value_id': 6}, {'key_id': NULL, 'value_id': 3}, {'key_id': NULL, 'value_id': 4}, {'key_id': NULL, 'value_id': 5}, {'key_id': 3, 'value_id': 7}], 'values': [{'type_id': 29, 'byte_offset': 0}, {'type_id': 5, 'byte_offset': 2}, {'type_id': 30, 'byte_offset': 6}, {'type_id': 5, 'byte_offset': 8}, {'type_id': 5, 'byte_offset': 12}, {'type_id': 5, 'byte_offset': 16}, {'type_id': 29, 'byte_offset': 20}, {'type_id': 1, 'byte_offset': 22}], 'data': '\\x03\\x00{\\x00\\x00\\x00\\x03\\x03\\x01\\x00\\x00\\x00\\x02\\x00\\x00\\x00\\x03\\x00\\x00\\x00\\x01\\x06'}
+{'keys': [test, hello, world, test], 'children': [{'key_id': 0, 'value_id': 1}, {'key_id': 1, 'value_id': 2}, {'key_id': 2, 'value_id': 6}, {'key_id': NULL, 'value_id': 3}, {'key_id': NULL, 'value_id': 4}, {'key_id': NULL, 'value_id': 5}, {'key_id': 3, 'value_id': 7}], 'values': [{'type_id': 29, 'byte_offset': 0}, {'type_id': 5, 'byte_offset': 2}, {'type_id': 30, 'byte_offset': 6}, {'type_id': 5, 'byte_offset': 8}, {'type_id': 5, 'byte_offset': 12}, {'type_id': 5, 'byte_offset': 16}, {'type_id': 29, 'byte_offset': 20}, {'type_id': 1, 'byte_offset': 22}], 'data': '\\x03\\x00{\\x00\\x00\\x00\\x03\\x03\\x04\\x00\\x00\\x00\\x05\\x00\\x00\\x00\\x06\\x00\\x00\\x00\\x01\\x06'}
+{'keys': [test, hello, world, test], 'children': [{'key_id': 0, 'value_id': 1}, {'key_id': 1, 'value_id': 2}, {'key_id': 2, 'value_id': 3}, {'key_id': 3, 'value_id': 4}], 'values': [{'type_id': 29, 'byte_offset': 0}, {'type_id': 5, 'byte_offset': 2}, {'type_id': 30, 'byte_offset': 6}, {'type_id': 29, 'byte_offset': 8}, {'type_id': 1, 'byte_offset': 10}], 'data': '\\x03\\x00{\\x00\\x00\\x00\\x00\\x00\\x01\\x03'}
 
-#query I
-#select to_variant(var)::JSON from tbl;
-#----
-#{"test":123,"hello":[1,2,3],"world":{"test":true}}
-#{"test":123,"hello":[4,5,6],"world":{"test":true}}
-#{"test":123,"hello":[],"world":{"test":true}}
+query I
+select to_variant(var)::JSON from tbl;
+----
+{"test":123,"hello":[1,2,3],"world":{"test":true}}
+{"test":123,"hello":[4,5,6],"world":{"test":true}}
+{"test":123,"hello":[],"world":{"test":true}}
 
-## NULL primitives
-#query I
-#select to_variant(['test', null, 'hello this is a big string', null]);
-#----
-#{'keys': [], 'children': [{'key_id': NULL, 'value_id': 1}, {'key_id': NULL, 'value_id': 2}, {'key_id': NULL, 'value_id': 3}, {'key_id': NULL, 'value_id': 4}], 'values': [{'type_id': 30, 'byte_offset': 0}, {'type_id': 16, 'byte_offset': 2}, {'type_id': 0, 'byte_offset': 7}, {'type_id': 16, 'byte_offset': 7}, {'type_id': 0, 'byte_offset': 34}], 'data': \x04\x00\x04test\x1Ahello this is a big string}
+# NULL primitives
+query I
+select to_variant(['test', null, 'hello this is a big string', null]);
+----
+{'keys': [], 'children': [{'key_id': NULL, 'value_id': 1}, {'key_id': NULL, 'value_id': 2}, {'key_id': NULL, 'value_id': 3}, {'key_id': NULL, 'value_id': 4}], 'values': [{'type_id': 30, 'byte_offset': 0}, {'type_id': 16, 'byte_offset': 2}, {'type_id': 0, 'byte_offset': 7}, {'type_id': 16, 'byte_offset': 7}, {'type_id': 0, 'byte_offset': 34}], 'data': \x04\x00\x04test\x1Ahello this is a big string}
 
-#query I
-#select to_variant(['test', null, 'hello this is a big string', null])::JSON;
-#----
-#["test",null,"hello this is a big string",null]
+query I
+select to_variant(['test', null, 'hello this is a big string', null])::JSON;
+----
+["test",null,"hello this is a big string",null]
 
-## NULL lists
-#query I
-#select to_variant([['test', null], [], null, [], ['hello this is a big string', null], null])::JSON;
-#----
-#[["test",null],[],null,[],["hello this is a big string",null],null]
+# NULL lists
+query I
+select to_variant([['test', null], [], null, [], ['hello this is a big string', null], null])::JSON;
+----
+[["test",null],[],null,[],["hello this is a big string",null],null]
 
-## NULL structs
-#query I
-#select to_variant([[{'test': null}], [], [null::STRUCT(test varchar)], [], [{'test': 'hello this is a big string'}, null], null])::JSON;
-#----
-#[[{"test":null}],null,[null],null,[{"test":"hello this is a big string"},null],null]
+# NULL structs
+query I
+select to_variant([[{'test': null}], [], [null::STRUCT(test varchar)], [], [{'test': 'hello this is a big string'}, null], null])::JSON;
+----
+[[{"test":null}],[],[null],[],[{"test":"hello this is a big string"},null],null]
 
-## Enum value
-#query I
-#select to_variant('test'::ENUM('test', 'hello', 'world'))::JSON;
-#----
-#"test"
+# Enum value
+query I
+select to_variant('test'::ENUM('test', 'hello', 'world'))::JSON;
+----
+"test"
 
-#statement ok
-#CREATE TABLE tbl1 (u UNION(num INTEGER, str VARCHAR));
+statement ok
+CREATE TABLE tbl1 (u UNION(num INTEGER, str VARCHAR));
 
-#statement ok
-#INSERT INTO tbl1 VALUES (1), (null), ('two'), (union_value(str := 'three')), (null::integer), (null::varchar), (union_value(str := null));
+statement ok
+INSERT INTO tbl1 VALUES (1), (null), ('two'), (union_value(str := 'three')), (null::integer), (null::varchar), (union_value(str := null));
 
-#query I
-#select to_variant(u)::JSON from tbl1;
-#----
-#1
-#null
-#"two"
-#"three"
-#null
-#null
-#null
+query I
+select to_variant(u)::JSON from tbl1;
+----
+1
+null
+"two"
+"three"
+null
+null
+null
 
 statement ok
 create type tp as UNION(a VARCHAR, b "NULL", c INTEGER, d BOOL, e DATE, f STRUCT(a VARCHAR, b "NULL"));
 
-#query I
-#select [
-#	'test'::VARCHAR::tp,
-#	null::VARCHAR::tp,
-#	1::INTEGER::tp,
-#	{'a': 'this is a long string', 'b': NULL}::tp,
-#	true::BOOL::tp,
-#	'1990/07/21'::DATE::tp
-#]::tp[]
-#----
-#[test, NULL, 1, {'a': this is a long string, 'b': NULL}, true, 1990-07-21]
+query I
+select [
+	'test'::VARCHAR::tp,
+	null::VARCHAR::tp,
+	1::INTEGER::tp,
+	{'a': 'this is a long string', 'b': NULL}::tp,
+	true::BOOL::tp,
+	'1990/07/21'::DATE::tp
+]::tp[]
+----
+[test, NULL, 1, {'a': this is a long string, 'b': NULL}, true, 1990-07-21]
 
-#query I
-#select to_variant([
-#	'test'::VARCHAR::tp,
-#	null::VARCHAR::tp,
-#	1::INTEGER::tp,
-#	{'a': 'this is a long string', 'b': NULL}::tp,
-#	true::BOOL::tp,
-#	'1990/07/21'::DATE::tp
-#]::tp[])::JSON
-#----
-#["test",null,1,{"a":null,"b":null},true,"1990-07-21"]
+query I
+select to_variant([
+	'test'::VARCHAR::tp,
+	null::VARCHAR::tp,
+	1::INTEGER::tp,
+	{'a': 'this is a long string', 'b': NULL}::tp,
+	true::BOOL::tp,
+	'1990/07/21'::DATE::tp
+]::tp[])::JSON
+----
+["test",null,1,{"a":"this is a long string","b":null},true,"1990-07-21"]
 
 statement ok
 create table tbl2(a STRUCT(a VARCHAR, b BOOL));
