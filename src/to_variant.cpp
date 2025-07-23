@@ -299,7 +299,7 @@ void GetValueSize(const uint32_t &val, vector<idx_t> &lengths, EnumConversionPay
 }
 
 template <bool WRITE_DATA>
-static inline void WriteContainerVarint(VariantVectorData &result, idx_t result_index, uint32_t &blob_offset,
+static inline void WriteContainerData(VariantVectorData &result, idx_t result_index, uint32_t &blob_offset,
                                         idx_t length, idx_t children_offset) {
 	const auto length_varint_size = GetVarintSize(length);
 	const auto child_offset_varint_size = length_varint_size ? GetVarintSize(children_offset) : 0;
@@ -463,7 +463,7 @@ static bool ConvertArrayToVariant(Vector &source, VariantVectorData &result, Dat
 		if (source_validity.RowIsValid(index)) {
 			WriteVariantMetadata<WRITE_DATA, VariantLogicalType::ARRAY>(
 			    result, values_list_entry.offset, values_offset_data[result_index], blob_offset, value_ids_selvec, i);
-			WriteContainerVarint<WRITE_DATA>(result, result_index, blob_offset, source_entry.length,
+			WriteContainerData<WRITE_DATA>(result, result_index, blob_offset, source_entry.length,
 			                                 children_offset_data[result_index]);
 			WriteContainerChildren<WRITE_DATA>(result, children_list_entry.offset, children_offset_data[result_index],
 			                                   source_entry, result_index, sel);
@@ -515,7 +515,7 @@ static bool ConvertListToVariant(Vector &source, VariantVectorData &result, Data
 			auto &entry = source_data[index];
 			WriteVariantMetadata<WRITE_DATA, VariantLogicalType::ARRAY>(
 			    result, values_list_entry.offset, values_offset_data[result_index], blob_offset, value_ids_selvec, i);
-			WriteContainerVarint<WRITE_DATA>(result, result_index, blob_offset, entry.length,
+			WriteContainerData<WRITE_DATA>(result, result_index, blob_offset, entry.length,
 			                                 children_offset_data[result_index]);
 			WriteContainerChildren<WRITE_DATA>(result, children_list_entry.offset, children_offset_data[result_index],
 														entry, result_index, sel);
@@ -578,19 +578,19 @@ static bool ConvertStructToVariant(Vector &source, VariantVectorData &result, Da
 		if (source_validity.RowIsValid(index)) {
 			WriteVariantMetadata<WRITE_DATA, VariantLogicalType::OBJECT>(
 			    result, values_list_entry.offset, values_offset_data[result_index], blob_offset, value_ids_selvec, i);
-			WriteContainerVarint<WRITE_DATA>(result, result_index, blob_offset, children.size(),
+			WriteContainerData<WRITE_DATA>(result, result_index, blob_offset, children.size(),
 			                                 children_offset_data[result_index]);
 
 			//! children
 			if (WRITE_DATA) {
-				auto children_offset = children_list_entry.offset + children_offset_data[result_index];
+				idx_t children_index = children_list_entry.offset + children_offset_data[result_index];
 				auto keys_offset = keys_list_entry.offset + keys_offset_data[result_index];
 				for (idx_t child_idx = 0; child_idx < children.size(); child_idx++) {
-					result.key_id_data[children_offset + child_idx] = keys_offset_data[result_index] + child_idx;
+					result.key_id_data[children_index + child_idx] = keys_offset_data[result_index] + child_idx;
 					keys_selvec.set_index(keys_offset + child_idx, dictionary_indices[child_idx]);
 				}
 				//! Map from index of the child to the children.value_ids of the parent
-				sel.children_selection.set_index(sel.count, children_offset);
+				sel.children_selection.set_index(sel.count, children_index);
 			}
 			sel.non_null_selection.set_index(sel.count, i);
 			sel.new_selection.set_index(sel.count, result_index);
