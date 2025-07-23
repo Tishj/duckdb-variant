@@ -351,12 +351,12 @@ static inline void WriteContainerChildren(VariantVectorData &result, uint64_t ch
 	sel.count += source_entry.length;
 }
 
-template <bool WRITE_DATA, VariantLogicalType TYPE_ID>
+template <bool WRITE_DATA>
 static inline void WriteVariantMetadata(VariantVectorData &result, uint64_t values_offset, uint32_t &values_offset_data,
-                                        uint32_t blob_offset, SelectionVector *value_ids_selvec, idx_t i) {
+                                        uint32_t blob_offset, SelectionVector *value_ids_selvec, idx_t i, VariantLogicalType type_id) {
 	if (WRITE_DATA) {
 		values_offset += values_offset_data;
-		result.type_ids_data[values_offset] = static_cast<uint8_t>(TYPE_ID);
+		result.type_ids_data[values_offset] = static_cast<uint8_t>(type_id);
 		result.byte_offset_data[values_offset] = blob_offset;
 		if (value_ids_selvec) {
 			result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data;
@@ -368,8 +368,7 @@ static inline void WriteVariantMetadata(VariantVectorData &result, uint64_t valu
 template <bool WRITE_DATA>
 static inline void HandleVariantNull(VariantVectorData &result, uint64_t values_offset, uint32_t &values_offset_data,
                                      uint32_t blob_offset, SelectionVector *value_ids_selvec, idx_t i) {
-	WriteVariantMetadata<WRITE_DATA, VariantLogicalType::VARIANT_NULL>(result, values_offset, values_offset_data,
-	                                                                   blob_offset, value_ids_selvec, i);
+	WriteVariantMetadata<WRITE_DATA>(result, values_offset, values_offset_data, blob_offset, value_ids_selvec, i, VariantLogicalType::VARIANT_NULL);
 }
 
 //! -------- Convert primitive values to Variant --------
@@ -399,21 +398,12 @@ static bool ConvertPrimitiveToVariant(Vector &source, VariantVectorData &result,
 			//! Write the value
 			auto &val = source_data[index];
 			GetValueSize<T>(val, lengths, payload);
-
+			WriteVariantMetadata<WRITE_DATA>(result, values_list_entry.offset, values_offset_data[result_index], blob_offset, value_ids_selvec, i, GetTypeId<T, TYPE_ID>(val));
 			if (WRITE_DATA) {
 				auto &blob_value = result.blob_data[result_index];
 				auto blob_value_data = data_ptr_cast(blob_value.GetDataWriteable());
-
-				auto values_offset = values_list_entry.offset + values_offset_data[result_index];
-				result.type_ids_data[values_offset] = static_cast<uint8_t>(GetTypeId<T, TYPE_ID>(val));
-				result.byte_offset_data[values_offset] = blob_offset;
-				if (value_ids_selvec) {
-					//! Set for the parent where this child lives in the 'values' list
-					result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
-				}
 				WriteData<T>(blob_value_data + blob_offset, val, lengths, payload);
 			}
-			values_offset_data[result_index]++;
 		} else if (!IGNORE_NULLS) {
 			HandleVariantNull<WRITE_DATA>(result, values_list_entry.offset, values_offset_data[result_index],
 			                              blob_offset, value_ids_selvec, i);
@@ -461,8 +451,8 @@ static bool ConvertArrayToVariant(Vector &source, VariantVectorData &result, Dat
 		source_entry.length = array_type_size;
 
 		if (source_validity.RowIsValid(index)) {
-			WriteVariantMetadata<WRITE_DATA, VariantLogicalType::ARRAY>(
-			    result, values_list_entry.offset, values_offset_data[result_index], blob_offset, value_ids_selvec, i);
+			WriteVariantMetadata<WRITE_DATA>(
+			    result, values_list_entry.offset, values_offset_data[result_index], blob_offset, value_ids_selvec, i, VariantLogicalType::ARRAY);
 			WriteContainerData<WRITE_DATA>(result, result_index, blob_offset, source_entry.length,
 			                                 children_offset_data[result_index]);
 			WriteContainerChildren<WRITE_DATA>(result, children_list_entry.offset, children_offset_data[result_index],
@@ -513,8 +503,8 @@ static bool ConvertListToVariant(Vector &source, VariantVectorData &result, Data
 
 		if (source_validity.RowIsValid(index)) {
 			auto &entry = source_data[index];
-			WriteVariantMetadata<WRITE_DATA, VariantLogicalType::ARRAY>(
-			    result, values_list_entry.offset, values_offset_data[result_index], blob_offset, value_ids_selvec, i);
+			WriteVariantMetadata<WRITE_DATA>(
+			    result, values_list_entry.offset, values_offset_data[result_index], blob_offset, value_ids_selvec, i, VariantLogicalType::ARRAY);
 			WriteContainerData<WRITE_DATA>(result, result_index, blob_offset, entry.length,
 			                                 children_offset_data[result_index]);
 			WriteContainerChildren<WRITE_DATA>(result, children_list_entry.offset, children_offset_data[result_index],
@@ -576,8 +566,8 @@ static bool ConvertStructToVariant(Vector &source, VariantVectorData &result, Da
 		auto &keys_list_entry = result.keys_data[result_index];
 
 		if (source_validity.RowIsValid(index)) {
-			WriteVariantMetadata<WRITE_DATA, VariantLogicalType::OBJECT>(
-			    result, values_list_entry.offset, values_offset_data[result_index], blob_offset, value_ids_selvec, i);
+			WriteVariantMetadata<WRITE_DATA>(
+			    result, values_list_entry.offset, values_offset_data[result_index], blob_offset, value_ids_selvec, i, VariantLogicalType::OBJECT);
 			WriteContainerData<WRITE_DATA>(result, result_index, blob_offset, children.size(),
 			                                 children_offset_data[result_index]);
 
@@ -590,6 +580,7 @@ static bool ConvertStructToVariant(Vector &source, VariantVectorData &result, Da
 					keys_selvec.set_index(keys_offset + child_idx, dictionary_indices[child_idx]);
 				}
 				//! Map from index of the child to the children.value_ids of the parent
+				//! NOTE: this maps to the first index, below we are forwarding this for each child Vector we process.
 				sel.children_selection.set_index(sel.count, children_index);
 			}
 			sel.non_null_selection.set_index(sel.count, i);
