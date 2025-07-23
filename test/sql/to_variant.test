@@ -177,3 +177,28 @@ null
 [1,2,3,4,5,null,7,8,null,10]
 null
 [1,2,3,null,null,6,7,8,9,10]
+
+# -------- MAP --------
+
+statement ok
+create table map_tbl (a MAP(varchar, bool))
+
+statement ok
+INSERT INTO map_tbl VALUES
+	(NULL),
+	(MAP {'a': true, 'b': null, 'c': false}),
+	(NULL),
+	(MAP {'b': false, 'this is a long string': true, 'test': null}),
+	(NULL),
+	(MAP {'a': null})
+;
+
+query I
+select to_variant(a)::JSON from map_tbl;
+----
+null
+[{"key":"a","value":true},{"key":"b","value":null},{"key":"c","value":false}]
+null
+[{"key":"b","value":false},{"key":"this is a long string","value":true},{"key":"test","value":null}]
+null
+[{"key":"a","value":null}]

@@ -650,7 +650,6 @@ static bool ConvertStructToVariant(Vector &source, VariantVectorData &result, Da
 		}
 	}
 
-
 	for (auto &child_ptr : children) {
 		auto &child = *child_ptr;
 
@@ -763,7 +762,7 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 	auto logical_type = type.id();
 	if (type.IsNested()) {
 		switch (logical_type) {
-		//! TODO: convert MAP
+		case LogicalTypeId::MAP:
 		case LogicalTypeId::LIST:
 			return ConvertListToVariant<WRITE_DATA, IGNORE_NULLS>(source, result, offsets, count, selvec, keys_selvec,
 			                                                      dictionary, value_ids_selvec);
@@ -1011,6 +1010,9 @@ bool VariantFunctions::CastToVARIANT(Vector &source, Vector &result, idx_t count
 				string_t child_name_str(child.first.c_str(), child.first.size());
 				dictionary.AddString(keys_entry, std::move(child_name_str));
 			}
+		} else if (type.id() == LogicalTypeId::MAP) {
+			dictionary.AddString(keys_entry, string_t("key", 3));
+			dictionary.AddString(keys_entry, string_t("value", 5));
 		}
 		return false;
 	});
