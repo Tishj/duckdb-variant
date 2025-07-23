@@ -367,6 +367,107 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
                              SelectionVector *value_ids_selvec);
 
 template <bool WRITE_DATA, bool IGNORE_NULLS>
+static bool ConvertArrayToVariant(Vector &source, VariantVectorData &result, DataChunk &offsets, idx_t count,
+                                 SelectionVector *selvec, SelectionVector &keys_selvec, StringDictionary &dictionary,
+                                 SelectionVector *value_ids_selvec) {
+	auto blob_offset_data = OffsetData::GetBlob(offsets);
+	auto values_offset_data = OffsetData::GetValues(offsets);
+	auto children_offset_data = OffsetData::GetChildren(offsets);
+
+	UnifiedVectorFormat source_format;
+	source.ToUnifiedFormat(count, source_format);
+	auto &source_validity = source_format.validity;
+
+	auto array_type_size = ArrayType::GetSize(source.GetType());
+	auto list_size = ArrayVector::GetTotalSize(source);
+
+	idx_t child_count = 0;
+	//! Create a selection vector that maps to the right row in the 'result' for the child vector
+	SelectionVector new_selection(0, list_size);
+	//! Create a selection vector that maps to the children.value_id entry of the parent
+	SelectionVector children_selection(0, list_size);
+	SelectionVector non_null_selection(0, list_size);
+	for (idx_t i = 0; i < count; i++) {
+		const auto index = source_format.sel->get_index(i);
+		const auto result_index = selvec ? selvec->get_index(i) : i;
+
+		auto &blob_offset = blob_offset_data[result_index];
+		auto &values_list_entry = result.values_data[result_index];
+		auto &children_list_entry = result.children_data[result_index];
+
+		list_entry_t entry;
+		entry.offset = child_count;
+		entry.length = array_type_size;
+
+		if (source_validity.RowIsValid(index)) {
+			//! values
+			if (WRITE_DATA) {
+				//! type_id + byte_offset
+				auto values_offset = values_list_entry.offset + values_offset_data[result_index];
+				result.type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::ARRAY);
+				result.byte_offset_data[values_offset] = blob_offset;
+				if (value_ids_selvec) {
+					//! Set for the parent where this child lives in the 'values' list
+					result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
+				}
+			}
+			//! value
+			const auto length_varint_size = GetVarintSize(entry.length);
+			const auto child_offset_varint_size =
+			    length_varint_size ? GetVarintSize(children_offset_data[result_index]) : 0;
+			if (WRITE_DATA) {
+				auto &blob_value = result.blob_data[result_index];
+				auto blob_value_data = data_ptr_cast(blob_value.GetDataWriteable());
+
+				VarintEncode(entry.length, blob_value_data + blob_offset);
+				if (entry.length) {
+					VarintEncode(children_offset_data[result_index],
+					             blob_value_data + blob_offset + length_varint_size);
+				}
+			}
+			blob_offset += length_varint_size + child_offset_varint_size;
+
+			auto children_offset = children_list_entry.offset + children_offset_data[result_index];
+			for (idx_t child_idx = 0; child_idx < entry.length; child_idx++) {
+				//! Set up the selection vector for the child of the list vector
+				new_selection.set_index(child_idx + entry.offset, result_index);
+				if (WRITE_DATA) {
+					children_selection.set_index(child_idx + entry.offset, children_offset + child_idx);
+					result.key_id_validity.SetInvalid(children_offset + child_idx);
+				}
+				non_null_selection.set_index(entry.offset + child_idx, (i * array_type_size) + child_idx);
+			}
+			children_offset_data[result_index] += entry.length;
+			values_offset_data[result_index]++;
+			child_count += entry.length;
+		} else if (!IGNORE_NULLS) {
+			if (WRITE_DATA) {
+				//! type_id + byte_offset
+				auto values_offset = values_list_entry.offset + values_offset_data[result_index];
+				result.type_ids_data[values_offset] = static_cast<uint8_t>(VariantLogicalType::VARIANT_NULL);
+				result.byte_offset_data[values_offset] = blob_offset;
+				if (value_ids_selvec) {
+					//! Set for the parent where this child lives in the 'values' list
+					result.value_id_data[value_ids_selvec->get_index(i)] = values_offset_data[result_index];
+				}
+			}
+			values_offset_data[result_index]++;
+		}
+	}
+
+	//! Now write the child vector of the list
+	auto &entry = ArrayVector::GetEntry(source);
+	if (child_count != list_size) {
+		Vector sliced_entry(entry.GetType(), nullptr);
+		sliced_entry.Dictionary(entry, list_size, non_null_selection, child_count);
+		return ConvertToVariant<WRITE_DATA, false>(sliced_entry, result, offsets, child_count, &new_selection, keys_selvec, dictionary, &children_selection);
+	} else {
+		//! All rows are valid, no need to slice the child
+		return ConvertToVariant<WRITE_DATA, false>(entry, result, offsets, child_count, &new_selection, keys_selvec, dictionary, &children_selection);
+	}
+}
+
+template <bool WRITE_DATA, bool IGNORE_NULLS>
 static bool ConvertListToVariant(Vector &source, VariantVectorData &result, DataChunk &offsets, idx_t count,
                                  SelectionVector *selvec, SelectionVector &keys_selvec, StringDictionary &dictionary,
                                  SelectionVector *value_ids_selvec) {
@@ -662,9 +763,12 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 	auto logical_type = type.id();
 	if (type.IsNested()) {
 		switch (logical_type) {
-		//! TODO: convert ARRAY and MAP
+		//! TODO: convert MAP
 		case LogicalTypeId::LIST:
 			return ConvertListToVariant<WRITE_DATA, IGNORE_NULLS>(source, result, offsets, count, selvec, keys_selvec,
+			                                                      dictionary, value_ids_selvec);
+		case LogicalTypeId::ARRAY:
+			return ConvertArrayToVariant<WRITE_DATA, IGNORE_NULLS>(source, result, offsets, count, selvec, keys_selvec,
 			                                                      dictionary, value_ids_selvec);
 		case LogicalTypeId::STRUCT:
 			return ConvertStructToVariant<WRITE_DATA, IGNORE_NULLS>(source, result, offsets, count, selvec, keys_selvec,
