@@ -13,6 +13,8 @@ public:
 	static bool CastJSONToVARIANT(Vector &source, Vector &result, idx_t count, CastParameters &parameters);
 	//! VARIANT -> LogicalType::JSON
 	static bool CastVARIANTToJSON(Vector &source, Vector &result, idx_t count, CastParameters &parameters);
+	//! VARIANT -> LogicalType::VARCHAR
+	static bool CastVARIANTToVARCHAR(Vector &source, Vector &result, idx_t count, CastParameters &parameters);
 };
 
 } // namespace duckdb
