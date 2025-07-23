@@ -10,17 +10,17 @@ require variant
 query I
 select '"test"'::JSON::VARIANT;
 ----
-{'keys': [], 'children': [], 'values': [{'type_id': 16, 'byte_offset': 0}], 'data': \x04test}
+test
 
 query I
 select ['"test"' for _ in range(10)]::JSON::VARIANT;
 ----
-{'keys': [], 'children': [{'key_id': NULL, 'value_id': 1}, {'key_id': NULL, 'value_id': 2}, {'key_id': NULL, 'value_id': 3}, {'key_id': NULL, 'value_id': 4}, {'key_id': NULL, 'value_id': 5}, {'key_id': NULL, 'value_id': 6}, {'key_id': NULL, 'value_id': 7}, {'key_id': NULL, 'value_id': 8}, {'key_id': NULL, 'value_id': 9}, {'key_id': NULL, 'value_id': 10}], 'values': [{'type_id': 27, 'byte_offset': 0}, {'type_id': 16, 'byte_offset': 2}, {'type_id': 16, 'byte_offset': 9}, {'type_id': 16, 'byte_offset': 16}, {'type_id': 16, 'byte_offset': 23}, {'type_id': 16, 'byte_offset': 30}, {'type_id': 16, 'byte_offset': 37}, {'type_id': 16, 'byte_offset': 44}, {'type_id': 16, 'byte_offset': 51}, {'type_id': 16, 'byte_offset': 58}, {'type_id': 16, 'byte_offset': 65}], 'data': \x0A\x00\x06\x22test\x22\x06\x22test\x22\x06\x22test\x22\x06\x22test\x22\x06\x22test\x22\x06\x22test\x22\x06\x22test\x22\x06\x22test\x22\x06\x22test\x22\x06\x22test\x22}
+["test", "test", "test", "test", "test", "test", "test", "test", "test", "test"]
 
 query I
 select '{"hello": [1,2,true, false, null], "test": [1, {"test": false}, ["blob", "this is a long string", 123]]}'::JSON::VARIANT;
 ----
-{'keys': [hello, test, test], 'children': [{'key_id': 0, 'value_id': 1}, {'key_id': 2, 'value_id': 7}, {'key_id': NULL, 'value_id': 2}, {'key_id': NULL, 'value_id': 3}, {'key_id': NULL, 'value_id': 4}, {'key_id': NULL, 'value_id': 5}, {'key_id': NULL, 'value_id': 6}, {'key_id': NULL, 'value_id': 8}, {'key_id': NULL, 'value_id': 9}, {'key_id': NULL, 'value_id': 11}, {'key_id': 1, 'value_id': 10}, {'key_id': NULL, 'value_id': 12}, {'key_id': NULL, 'value_id': 13}, {'key_id': NULL, 'value_id': 14}], 'values': [{'type_id': 26, 'byte_offset': 0}, {'type_id': 27, 'byte_offset': 2}, {'type_id': 11, 'byte_offset': 4}, {'type_id': 11, 'byte_offset': 5}, {'type_id': 1, 'byte_offset': 6}, {'type_id': 2, 'byte_offset': 6}, {'type_id': 0, 'byte_offset': 6}, {'type_id': 27, 'byte_offset': 6}, {'type_id': 11, 'byte_offset': 8}, {'type_id': 26, 'byte_offset': 9}, {'type_id': 2, 'byte_offset': 11}, {'type_id': 27, 'byte_offset': 11}, {'type_id': 16, 'byte_offset': 13}, {'type_id': 16, 'byte_offset': 18}, {'type_id': 11, 'byte_offset': 40}], 'data': '\\x02\\x00\\x05\\x02\\x01\\x02\\x03\\x07\\x01\\x01\\x0A\\x03\\x0B\\x04blob\\x15this is a long string{'}
+{'hello': [1, 2, true, false, NULL], 'test': [1, {'test': false}, [blob, this is a long string, 123]]}
 
 # ---------- VARIANT -> JSON ----------
 
@@ -52,3 +52,22 @@ select '{"hello": [1,2,true, false, null], "test": [1, {"test": false}, ["blob",
 {"hello":[1,2,true,false,null],"test":[1,{"test":false},["blob","this is a long string",123]]}
 {"hello":[1,2,true,false,null],"test":[1,{"test":false},["blob","this is a long string",123]]}
 {"hello":[1,2,true,false,null],"test":[1,{"test":false},["blob","this is a long string",123]]}
+
+statement ok
+create table tbl(var JSON);
+
+statement ok
+insert into tbl select '{"test":123,"hello":[1,2,3],"world":{"test":true}}';
+
+statement ok
+insert into tbl select '{"test":123,"hello":[4,5,6],"world":{"test":true}}';
+
+statement ok
+insert into tbl select '{"test":123,"hello":[],"world":{"test":true}}';
+
+query I
+select var::VARIANT::JSON from tbl;
+----
+{"test":123,"hello":[1,2,3],"world":{"test":true}}
+{"test":123,"hello":[4,5,6],"world":{"test":true}}
+{"test":123,"hello":[],"world":{"test":true}}

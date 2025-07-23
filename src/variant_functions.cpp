@@ -6,6 +6,9 @@
 #include "duckdb/common/optional_idx.hpp"
 #include "duckdb/common/string_map_set.hpp"
 #include "duckdb/common/types/selection_vector.hpp"
+#include "duckdb/common/types/decimal.hpp"
+#include "duckdb/common/types/time.hpp"
+#include "duckdb/common/types/timestamp.hpp"
 
 using namespace duckdb_yyjson; // NOLINT
 
@@ -86,7 +89,7 @@ public:
 	//! Record the relationship between index in the 'keys' (child) and the index in the dictionary
 	SelectionVector sel_vec;
 	idx_t sel_vec_capacity = 0;
-	//! Unsure uniqueness of the dictionary entries
+	//! Ensure uniqueness of the dictionary entries
 	string_map_t<idx_t> dictionary;
 	idx_t dictionary_capacity = STANDARD_VECTOR_SIZE;
 
@@ -251,13 +254,13 @@ static optional_idx ConvertJSON(yyjson_val *val, Vector &result, VariantConversi
 	}
 	case YYJSON_TYPE_NUM | YYJSON_SUBTYPE_UINT: {
 		auto value = unsafe_yyjson_get_uint(val);
-		VarintEncode(value, state.stream);
+		state.stream.WriteData(const_data_ptr_cast(&value), sizeof(uint64_t));
 		type_ids_data[index] = static_cast<uint8_t>(VariantLogicalType::UINT64);
 		break;
 	}
 	case YYJSON_TYPE_NUM | YYJSON_SUBTYPE_SINT: {
 		auto value = unsafe_yyjson_get_sint(val);
-		VarintEncode(value, state.stream);
+		state.stream.WriteData(const_data_ptr_cast(&value), sizeof(int64_t));
 		type_ids_data[index] = static_cast<uint8_t>(VariantLogicalType::INT64);
 		break;
 	}
@@ -353,70 +356,6 @@ bool VariantFunctions::CastJSONToVARIANT(Vector &source, Vector &result, idx_t c
 
 //! ------------ Variant -> JSON ------------
 
-namespace {
-
-template <class T>
-static T VarintDecode(const_data_ptr_t &ptr) {
-	T result = 0;
-	uint8_t shift = 0;
-	while (true) {
-		uint8_t byte;
-		byte = *(ptr++);
-		result |= T(byte & 127) << shift;
-		if ((byte & 128) == 0) {
-			break;
-		}
-		shift += 7;
-		if (shift > sizeof(T) * 8) {
-			throw std::runtime_error("Varint-decoding found too large number");
-		}
-	}
-	return result;
-}
-
-struct UnifiedVariantVector {
-	//! The 'keys' list (dictionary)
-	static UnifiedVectorFormat &GetKeys(RecursiveUnifiedVectorFormat &vec) {
-		return vec.children[0].unified;
-	}
-	//! The 'keys' list entry
-	static UnifiedVectorFormat &GetKeysEntry(RecursiveUnifiedVectorFormat &vec) {
-		return vec.children[0].children[0].unified;
-	}
-	//! The 'children' list
-	static UnifiedVectorFormat &GetChildren(RecursiveUnifiedVectorFormat &vec) {
-		return vec.children[1].unified;
-	}
-	//! The 'key_id' inside the 'children' list
-	static UnifiedVectorFormat &GetChildrenKeyId(RecursiveUnifiedVectorFormat &vec) {
-		return vec.children[1].children[0].children[0].unified;
-	}
-	//! The 'value_id' inside the 'children' list
-	static UnifiedVectorFormat &GetChildrenValueId(RecursiveUnifiedVectorFormat &vec) {
-		return vec.children[1].children[0].children[1].unified;
-	}
-	//! The 'values' list
-	static UnifiedVectorFormat &GetValues(RecursiveUnifiedVectorFormat &vec) {
-		return vec.children[2].unified;
-	}
-	//! The 'type_id' inside the 'values' list
-	static UnifiedVectorFormat &GetValuesTypeId(RecursiveUnifiedVectorFormat &vec) {
-		auto &values = vec.children[2];
-		return values.children[0].children[0].unified;
-	}
-	//! The 'byte_offset' inside the 'values' list
-	static UnifiedVectorFormat &GetValuesByteOffset(RecursiveUnifiedVectorFormat &vec) {
-		auto &values = vec.children[2];
-		return values.children[0].children[1].unified;
-	}
-	//! The binary blob 'value' encoding the Variant for the row
-	static UnifiedVectorFormat &GetValue(RecursiveUnifiedVectorFormat &vec) {
-		return vec.children[3].unified;
-	}
-};
-
-} // namespace
-
 yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat &source, idx_t row, idx_t values_idx) {
 	//! values
 	auto &values = UnifiedVariantVector::GetValues(source);
@@ -472,22 +411,132 @@ yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat
 		return yyjson_mut_true(doc);
 	case VariantLogicalType::BOOL_FALSE:
 		return yyjson_mut_false(doc);
+	case VariantLogicalType::INT8: {
+		auto val = Load<int8_t>(ptr);
+		return yyjson_mut_sint(doc, val);
+	}
+	case VariantLogicalType::INT16: {
+		auto val = Load<int16_t>(ptr);
+		return yyjson_mut_sint(doc, val);
+	}
+	case VariantLogicalType::INT32: {
+		auto val = Load<int32_t>(ptr);
+		return yyjson_mut_sint(doc, val);
+	}
 	case VariantLogicalType::INT64: {
-		auto val = VarintDecode<int64_t>(ptr);
+		auto val = Load<int64_t>(ptr);
+		return yyjson_mut_sint(doc, val);
+	}
+	case VariantLogicalType::INT128: {
+		auto val = Load<hugeint_t>(ptr);
+		auto val_str = val.ToString();
+		return yyjson_mut_rawncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::UINT8: {
+		auto val = Load<uint8_t>(ptr);
+		return yyjson_mut_sint(doc, val);
+	}
+	case VariantLogicalType::UINT16: {
+		auto val = Load<uint16_t>(ptr);
+		return yyjson_mut_sint(doc, val);
+	}
+	case VariantLogicalType::UINT32: {
+		auto val = Load<uint32_t>(ptr);
 		return yyjson_mut_sint(doc, val);
 	}
 	case VariantLogicalType::UINT64: {
-		auto val = VarintDecode<uint64_t>(ptr);
+		auto val = Load<uint64_t>(ptr);
 		return yyjson_mut_uint(doc, val);
+	}
+	case VariantLogicalType::UINT128: {
+		auto val = Load<uhugeint_t>(ptr);
+		auto val_str = val.ToString();
+		return yyjson_mut_rawncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::UUID: {
+		auto val = Value::UUID(Load<hugeint_t>(ptr));
+		auto val_str = val.ToString();
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::INTERVAL: {
+		auto val = Value::INTERVAL(Load<interval_t>(ptr));
+		auto val_str = val.ToString();
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::FLOAT: {
+		auto val = Load<float>(ptr);
+		return yyjson_mut_real(doc, val);
 	}
 	case VariantLogicalType::DOUBLE: {
 		auto val = Load<double>(ptr);
 		return yyjson_mut_real(doc, val);
 	}
+	case VariantLogicalType::DATE: {
+		auto val = Load<int32_t>(ptr);
+		auto val_str = Date::ToString(date_t(val));
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::BLOB: {
+		auto string_length = VarintDecode<uint32_t>(ptr);
+		auto string_data = reinterpret_cast<const char *>(ptr);
+		auto val_str = Value::BLOB(const_data_ptr_cast(string_data), string_length).ToString();
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
 	case VariantLogicalType::VARCHAR: {
 		auto string_length = VarintDecode<uint32_t>(ptr);
 		auto string_data = reinterpret_cast<const char *>(ptr);
 		return yyjson_mut_strncpy(doc, string_data, static_cast<size_t>(string_length));
+	}
+	case VariantLogicalType::DECIMAL: {
+		auto width = VarintDecode<idx_t>(ptr);
+		auto scale = VarintDecode<idx_t>(ptr);
+
+		string val_str;
+		if (width > DecimalWidth<int64_t>::max) {
+			val_str = Decimal::ToString(Load<hugeint_t>(ptr), width, scale);
+		} else if (width > DecimalWidth<int32_t>::max) {
+			val_str = Decimal::ToString(Load<int64_t>(ptr), width, scale);
+		} else if (width > DecimalWidth<int16_t>::max) {
+			val_str = Decimal::ToString(Load<int32_t>(ptr), width, scale);
+		} else {
+			val_str = Decimal::ToString(Load<int16_t>(ptr), width, scale);
+		}
+		return yyjson_mut_rawncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::TIME_MICROS: {
+		auto val = Load<dtime_t>(ptr);
+		auto val_str = Time::ToString(val);
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::TIME_MICROS_TZ: {
+		auto val = Value::TIMETZ(Load<dtime_tz_t>(ptr));
+		auto val_str = val.ToString();
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::TIMESTAMP_MICROS: {
+		auto val = Load<timestamp_t>(ptr);
+		auto val_str = Timestamp::ToString(val);
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::TIMESTAMP_SEC: {
+		auto val = Value::TIMESTAMPSEC(Load<timestamp_sec_t>(ptr));
+		auto val_str = val.ToString();
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::TIMESTAMP_NANOS: {
+		auto val = Value::TIMESTAMPNS(Load<timestamp_ns_t>(ptr));
+		auto val_str = val.ToString();
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::TIMESTAMP_MILIS: {
+		auto val = Value::TIMESTAMPMS(Load<timestamp_ms_t>(ptr));
+		auto val_str = val.ToString();
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::TIMESTAMP_MICROS_TZ: {
+		auto val = Value::TIMESTAMPTZ(Load<timestamp_tz_t>(ptr));
+		auto val_str = val.ToString();
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
 	}
 	case VariantLogicalType::ARRAY: {
 		auto count = VarintDecode<uint32_t>(ptr);

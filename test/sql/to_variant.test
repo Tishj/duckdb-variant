@@ -1,0 +1,199 @@
+# name: test/sql/to_variant.test
+# group: [sql]
+
+require variant
+
+require json
+
+query I
+select to_variant('test')
+----
+test
+
+query I
+select to_variant(['test', 'hello', 'world'])
+----
+[test, hello, world]
+
+query I
+select to_variant(['test', 'hello', 'world'])::JSON
+----
+["test","hello","world"]
+
+query I
+select to_variant({'test': 123, 'hello': [1,2,3], 'world': {'test': true}})
+----
+{'test': 123, 'hello': [1, 2, 3], 'world': {'test': true}}
+
+query I
+select to_variant({'test': 123, 'hello': [1,2,3], 'world': {'test': true}})::JSON from range(3)
+----
+{"test":123,"hello":[1,2,3],"world":{"test":true}}
+{"test":123,"hello":[1,2,3],"world":{"test":true}}
+{"test":123,"hello":[1,2,3],"world":{"test":true}}
+
+statement ok
+create table tbl as select {'test': 123, 'hello': [1,2,3], 'world': {'test': true}} var;
+
+statement ok
+insert into tbl select {'test': 123, 'hello': [4,5,6], 'world': {'test': true}};
+
+statement ok
+insert into tbl select {'test': 123, 'hello': [], 'world': {'test': true}};
+
+query I
+select to_variant(var) from tbl;
+----
+{'test': 123, 'hello': [1, 2, 3], 'world': {'test': true}}
+{'test': 123, 'hello': [4, 5, 6], 'world': {'test': true}}
+{'test': 123, 'hello': [], 'world': {'test': true}}
+
+query I
+select to_variant(var)::JSON from tbl;
+----
+{"test":123,"hello":[1,2,3],"world":{"test":true}}
+{"test":123,"hello":[4,5,6],"world":{"test":true}}
+{"test":123,"hello":[],"world":{"test":true}}
+
+# NULL primitives
+query I
+select to_variant(['test', null, 'hello this is a big string', null]);
+----
+[test, NULL, hello this is a big string, NULL]
+
+query I
+select to_variant(['test', null, 'hello this is a big string', null])::JSON;
+----
+["test",null,"hello this is a big string",null]
+
+# NULL lists
+query I
+select to_variant([['test', null], [], null, [], ['hello this is a big string', null], null])::JSON;
+----
+[["test",null],[],null,[],["hello this is a big string",null],null]
+
+# NULL structs
+query I
+select to_variant([[{'test': null}], [], [null::STRUCT(test varchar)], [], [{'test': 'hello this is a big string'}, null], null])::JSON;
+----
+[[{"test":null}],[],[null],[],[{"test":"hello this is a big string"},null],null]
+
+# Enum value
+query I
+select to_variant('test'::ENUM('test', 'hello', 'world'))::JSON;
+----
+"test"
+
+statement ok
+CREATE TABLE tbl1 (u UNION(num INTEGER, str VARCHAR));
+
+statement ok
+INSERT INTO tbl1 VALUES (1), (null), ('two'), (union_value(str := 'three')), (null::integer), (null::varchar), (union_value(str := null));
+
+query I
+select to_variant(u)::JSON from tbl1;
+----
+1
+null
+"two"
+"three"
+null
+null
+null
+
+statement ok
+create type tp as UNION(a VARCHAR, b "NULL", c INTEGER, d BOOL, e DATE, f STRUCT(a VARCHAR, b "NULL"));
+
+query I
+select [
+	'test'::VARCHAR::tp,
+	null::VARCHAR::tp,
+	1::INTEGER::tp,
+	{'a': 'this is a long string', 'b': NULL}::tp,
+	true::BOOL::tp,
+	'1990/07/21'::DATE::tp
+]::tp[]
+----
+[test, NULL, 1, {'a': this is a long string, 'b': NULL}, true, 1990-07-21]
+
+query I
+select to_variant([
+	'test'::VARCHAR::tp,
+	null::VARCHAR::tp,
+	1::INTEGER::tp,
+	{'a': 'this is a long string', 'b': NULL}::tp,
+	true::BOOL::tp,
+	'1990/07/21'::DATE::tp
+]::tp[])::JSON
+----
+["test",null,1,{"a":"this is a long string","b":null},true,"1990-07-21"]
+
+statement ok
+create table tbl2(a STRUCT(a VARCHAR, b BOOL));
+
+statement ok
+insert into tbl2 VALUES
+	(NULL),
+	(NULL),
+	(row('test', true)),
+	(row('hello this is a long string', false))
+;
+
+
+query I
+select to_variant(a)::JSON from tbl2;
+----
+null
+null
+{"a":"test","b":true}
+{"a":"hello this is a long string","b":false}
+
+# -------- ARRAY --------
+
+statement ok
+create table array_tbl (a INT[10])
+
+statement ok
+INSERT INTO array_tbl VALUES
+	(NULL),
+	([1,2,3,4,5,6,7,8,9,10]),
+	(NULL),
+	([1,2,3,4,5,null,7,8,null,10]),
+	(NULL),
+	([1,2,3,null,null,6,7,8,9,10])
+;
+
+query I
+select to_variant(a)::JSON from array_tbl;
+----
+null
+[1,2,3,4,5,6,7,8,9,10]
+null
+[1,2,3,4,5,null,7,8,null,10]
+null
+[1,2,3,null,null,6,7,8,9,10]
+
+# -------- MAP --------
+
+statement ok
+create table map_tbl (a MAP(varchar, bool))
+
+statement ok
+INSERT INTO map_tbl VALUES
+	(NULL),
+	(MAP {'a': true, 'b': null, 'c': false}),
+	(NULL),
+	(MAP {'b': false, 'this is a long string': true, 'test': null}),
+	(NULL),
+	(MAP {'a': null})
+;
+
+query I
+select to_variant(a)::JSON from map_tbl;
+----
+null
+[{"key":"a","value":true},{"key":"b","value":null},{"key":"c","value":false}]
+null
+[{"key":"b","value":false},{"key":"this is a long string","value":true},{"key":"test","value":null}]
+null
+[{"key":"a","value":null}]

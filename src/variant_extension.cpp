@@ -32,17 +32,31 @@ static LogicalType CreateVariantType() {
 	return res;
 }
 
+static void ToVariantFunction(DataChunk &args, ExpressionState &state, Vector &result) {
+	auto &input = args.data[0];
+	CastParameters parameters;
+	VariantFunctions::CastToVARIANT(input, result, args.size(), parameters);
+}
+
+static unique_ptr<FunctionData> ToVariantBind(ClientContext &context, ScalarFunction &bound_function,
+                                              vector<unique_ptr<Expression>> &arguments) {
+	bound_function.return_type = CreateVariantType();
+	return nullptr;
+}
+
 static void LoadInternal(ExtensionLoader &loader) {
 	// add the "variant" type
 	auto variant_type = CreateVariantType();
 	loader.RegisterType(VARIANT_TYPE_NAME, variant_type);
 
 	// add the casts to and from VARIANT type
-	loader.RegisterCastFunction(LogicalType::JSON(), variant_type,
-	                                    VariantFunctions::CastJSONToVARIANT);
-	loader.RegisterCastFunction(variant_type, LogicalType::JSON(),
-	                                    VariantFunctions::CastVARIANTToJSON);
-	loader.RegisterCastFunction(LogicalType::ANY, variant_type, VariantFunctions::CastToVARIANT);
+	loader.RegisterCastFunction(LogicalType::JSON(), variant_type, VariantFunctions::CastJSONToVARIANT);
+	loader.RegisterCastFunction(variant_type, LogicalType::JSON(), VariantFunctions::CastVARIANTToJSON);
+	loader.RegisterCastFunction(variant_type, LogicalType::VARCHAR, VariantFunctions::CastVARIANTToVARCHAR);
+	ScalarFunction to_variant_func("to_variant", {LogicalType::ANY}, variant_type, ToVariantFunction);
+	to_variant_func.bind = ToVariantBind;
+	to_variant_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
+	loader.RegisterFunction(to_variant_func);
 }
 
 void VariantExtension::Load(ExtensionLoader &db) {
