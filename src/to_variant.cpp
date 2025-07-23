@@ -756,7 +756,6 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 			return ConvertPrimitiveToVariant<WRITE_DATA, IGNORE_NULLS, VariantLogicalType::DOUBLE, double>(
 			    source, result, offsets, count, selvec, value_ids_selvec, empty_payload);
 		case LogicalTypeId::DECIMAL: {
-			//! Values only used for Decimal conversion
 			uint8_t width;
 			uint8_t scale;
 			type.GetDecimalProperties(width, scale);
