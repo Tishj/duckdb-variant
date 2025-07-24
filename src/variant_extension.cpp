@@ -89,7 +89,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	loader.RegisterCastFunction(variant_type, LogicalType::VARCHAR, VariantFunctions::CastVARIANTToVARCHAR, 5);
 
 	auto &casts = DBConfig::GetConfig(loader.GetDatabaseInstance()).GetCastFunctions();
-	// Anything can be cast to JSON
+	// Anything can be cast to VARIANT
 	for (const auto &type : LogicalType::AllTypes()) {
 		LogicalType source_type;
 		switch (type.id()) {
