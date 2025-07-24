@@ -11,7 +11,7 @@ statement ok
 call dbgen(sf=0.001)
 
 statement ok
-create table variant_lineitem as select to_variant(STRUCT_PACK(*COLUMNS(*))) from lineitem;
+create table variant_lineitem as select STRUCT_PACK(*COLUMNS(*))::VARIANT from lineitem;
 
 query I
 select * from variant_lineitem limit 10;
