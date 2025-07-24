@@ -6,27 +6,27 @@ require variant
 require json
 
 query I
-select to_variant('test')
+select 'test'::VARIANT
 ----
 test
 
 query I
-select to_variant(['test', 'hello', 'world'])
+select ['test', 'hello', 'world']::VARIANT
 ----
 [test, hello, world]
 
 query I
-select to_variant(['test', 'hello', 'world'])::JSON
+select ['test', 'hello', 'world']::VARIANT::JSON
 ----
 ["test","hello","world"]
 
 query I
-select to_variant({'test': 123, 'hello': [1,2,3], 'world': {'test': true}})
+select {'test': 123, 'hello': [1,2,3], 'world': {'test': true}}::VARIANT
 ----
 {'test': 123, 'hello': [1, 2, 3], 'world': {'test': true}}
 
 query I
-select to_variant({'test': 123, 'hello': [1,2,3], 'world': {'test': true}})::JSON from range(3)
+select {'test': 123, 'hello': [1,2,3], 'world': {'test': true}}::VARIANT::JSON from range(3)
 ----
 {"test":123,"hello":[1,2,3],"world":{"test":true}}
 {"test":123,"hello":[1,2,3],"world":{"test":true}}
@@ -42,14 +42,14 @@ statement ok
 insert into tbl select {'test': 123, 'hello': [], 'world': {'test': true}};
 
 query I
-select to_variant(var) from tbl;
+select var::VARIANT from tbl;
 ----
 {'test': 123, 'hello': [1, 2, 3], 'world': {'test': true}}
 {'test': 123, 'hello': [4, 5, 6], 'world': {'test': true}}
 {'test': 123, 'hello': [], 'world': {'test': true}}
 
 query I
-select to_variant(var)::JSON from tbl;
+select var::VARIANT::JSON from tbl;
 ----
 {"test":123,"hello":[1,2,3],"world":{"test":true}}
 {"test":123,"hello":[4,5,6],"world":{"test":true}}
@@ -57,30 +57,30 @@ select to_variant(var)::JSON from tbl;
 
 # NULL primitives
 query I
-select to_variant(['test', null, 'hello this is a big string', null]);
+select ['test', null, 'hello this is a big string', null]::VARIANT;
 ----
 [test, NULL, hello this is a big string, NULL]
 
 query I
-select to_variant(['test', null, 'hello this is a big string', null])::JSON;
+select ['test', null, 'hello this is a big string', null]::VARIANT::JSON;
 ----
 ["test",null,"hello this is a big string",null]
 
 # NULL lists
 query I
-select to_variant([['test', null], [], null, [], ['hello this is a big string', null], null])::JSON;
+select [['test', null], [], null, [], ['hello this is a big string', null], null]::VARIANT::JSON;
 ----
 [["test",null],[],null,[],["hello this is a big string",null],null]
 
 # NULL structs
 query I
-select to_variant([[{'test': null}], [], [null::STRUCT(test varchar)], [], [{'test': 'hello this is a big string'}, null], null])::JSON;
+select [[{'test': null}], [], [null::STRUCT(test varchar)], [], [{'test': 'hello this is a big string'}, null], null]::VARIANT::JSON;
 ----
 [[{"test":null}],[],[null],[],[{"test":"hello this is a big string"},null],null]
 
 # Enum value
 query I
-select to_variant('test'::ENUM('test', 'hello', 'world'))::JSON;
+select 'test'::ENUM('test', 'hello', 'world')::VARIANT::JSON;
 ----
 "test"
 
@@ -91,7 +91,7 @@ statement ok
 INSERT INTO tbl1 VALUES (1), (null), ('two'), (union_value(str := 'three')), (null::integer), (null::varchar), (union_value(str := null));
 
 query I
-select to_variant(u)::JSON from tbl1;
+select u::VARIANT::JSON from tbl1;
 ----
 1
 null
@@ -117,14 +117,14 @@ select [
 [test, NULL, 1, {'a': this is a long string, 'b': NULL}, true, 1990-07-21]
 
 query I
-select to_variant([
+select [
 	'test'::VARCHAR::tp,
 	null::VARCHAR::tp,
 	1::INTEGER::tp,
 	{'a': 'this is a long string', 'b': NULL}::tp,
 	true::BOOL::tp,
 	'1990/07/21'::DATE::tp
-]::tp[])::JSON
+]::tp[]::VARIANT::JSON
 ----
 ["test",null,1,{"a":"this is a long string","b":null},true,"1990-07-21"]
 
@@ -141,7 +141,7 @@ insert into tbl2 VALUES
 
 
 query I
-select to_variant(a)::JSON from tbl2;
+select a::VARIANT::JSON from tbl2;
 ----
 null
 null
@@ -164,7 +164,7 @@ INSERT INTO array_tbl VALUES
 ;
 
 query I
-select to_variant(a)::JSON from array_tbl;
+select a::VARIANT::JSON from array_tbl;
 ----
 null
 [1,2,3,4,5,6,7,8,9,10]
@@ -189,7 +189,7 @@ INSERT INTO map_tbl VALUES
 ;
 
 query I
-select to_variant(a)::JSON from map_tbl;
+select a::VARIANT::JSON from map_tbl;
 ----
 null
 [{"key":"a","value":true},{"key":"b","value":null},{"key":"c","value":false}]

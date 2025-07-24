@@ -78,18 +78,6 @@ static LogicalType CreateVariantType() {
 	return res;
 }
 
-static void ToVariantFunction(DataChunk &args, ExpressionState &state, Vector &result) {
-	auto &input = args.data[0];
-	CastParameters parameters;
-	VariantFunctions::CastToVARIANT(input, result, args.size(), parameters);
-}
-
-static unique_ptr<FunctionData> ToVariantBind(ClientContext &context, ScalarFunction &bound_function,
-                                              vector<unique_ptr<Expression>> &arguments) {
-	bound_function.return_type = CreateVariantType();
-	return nullptr;
-}
-
 static void LoadInternal(ExtensionLoader &loader) {
 	// add the "variant" type
 	auto variant_type = CreateVariantType();
@@ -99,10 +87,36 @@ static void LoadInternal(ExtensionLoader &loader) {
 	loader.RegisterCastFunction(LogicalType::JSON(), variant_type, VariantFunctions::CastJSONToVARIANT, 5);
 	loader.RegisterCastFunction(variant_type, LogicalType::JSON(), VariantFunctions::CastVARIANTToJSON, 5);
 	loader.RegisterCastFunction(variant_type, LogicalType::VARCHAR, VariantFunctions::CastVARIANTToVARCHAR, 5);
-	ScalarFunction to_variant_func("to_variant", {LogicalType::ANY}, variant_type, ToVariantFunction);
-	to_variant_func.bind = ToVariantBind;
-	to_variant_func.null_handling = FunctionNullHandling::SPECIAL_HANDLING;
-	loader.RegisterFunction(to_variant_func);
+
+	auto &casts = DBConfig::GetConfig(loader.GetDatabaseInstance()).GetCastFunctions();
+	// Anything can be cast to VARIANT
+	for (const auto &type : LogicalType::AllTypes()) {
+		LogicalType source_type;
+		switch (type.id()) {
+		case LogicalTypeId::STRUCT:
+			source_type = LogicalType::STRUCT({{"any", LogicalType::ANY}});
+			break;
+		case LogicalTypeId::LIST:
+			source_type = LogicalType::LIST(LogicalType::ANY);
+			break;
+		case LogicalTypeId::MAP:
+			source_type = LogicalType::MAP(LogicalType::ANY, LogicalType::ANY);
+			break;
+		case LogicalTypeId::UNION:
+			source_type = LogicalType::UNION({{"any", LogicalType::ANY}});
+			break;
+		case LogicalTypeId::ARRAY:
+			source_type = LogicalType::ARRAY(LogicalType::ANY, optional_idx());
+			break;
+		case LogicalTypeId::VARINT:
+		case LogicalTypeId::BIT:
+			//! TODO: we can't currently represent VARINT / BIT in a Variant
+			continue;
+		default:
+			source_type = type;
+		}
+		casts.RegisterCastFunction(source_type, variant_type, VariantFunctions::CastToVARIANT, 5);
+	}
 }
 
 void VariantExtension::Load(ExtensionLoader &db) {
