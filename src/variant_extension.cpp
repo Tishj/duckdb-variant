@@ -24,9 +24,10 @@ void VariantVector::SortVariantKeys(Vector &dictionary, idx_t dictionary_size, S
 	}
 
 	//! Sort the unique strings
-	std::sort(strings.begin(), strings.end(), [](const std::pair<reference<string_t>, idx_t> &a, const std::pair<reference<string_t>, idx_t> &b) {
-		return a.first.get() < b.first.get();
-	});
+	std::sort(strings.begin(), strings.end(),
+	          [](const std::pair<reference<string_t>, idx_t> &a, const std::pair<reference<string_t>, idx_t> &b) {
+		          return a.first.get() < b.first.get();
+	          });
 
 	bool is_already_sorted = true;
 	vector<idx_t> unsorted_to_sorted(strings.size());
@@ -58,7 +59,7 @@ void VariantVector::SortVariantKeys(Vector &dictionary, idx_t dictionary_size, S
 	}
 }
 
-static LogicalType CreateVariantType() {
+LogicalType CreateVariantType() {
 	child_list_t<LogicalType> top_level_children;
 	top_level_children.emplace_back("keys", LogicalType::LIST(LogicalType::VARCHAR));
 
@@ -116,6 +117,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 			source_type = type;
 		}
 		casts.RegisterCastFunction(source_type, variant_type, VariantFunctions::CastToVARIANT, 5);
+
+		casts.RegisterCastFunction(variant_type, source_type, VariantFunctions::CastFromVARIANT, 5);
 	}
 }
 

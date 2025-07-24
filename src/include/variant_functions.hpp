@@ -7,6 +7,8 @@ namespace duckdb {
 
 struct VariantFunctions {
 public:
+	//! Generic VARIANT -> LogicalTypeId::ANY
+	static bool CastFromVARIANT(Vector &source, Vector &result, idx_t count, CastParameters &parameters);
 	//! Generic LogicalTypeId::ANY -> VARIANT
 	static bool CastToVARIANT(Vector &source, Vector &result, idx_t count, CastParameters &parameters);
 	//! LogicalType::JSON -> VARIANT
