@@ -975,6 +975,8 @@ bool VariantFunctions::CastToVARIANT(Vector &source, Vector &result, idx_t count
 		ConvertToVariant<true>(source, result_data, offsets, count, nullptr, keys_selvec, dictionary, nullptr);
 	}
 
+	VariantVector::SortVariantKeys(keys_entry, dictionary.dictionary.size(), keys_selvec, keys_selvec_size);
+
 	keys_entry.Slice(keys_selvec, keys_selvec_size);
 
 	if (source.GetVectorType() == VectorType::CONSTANT_VECTOR) {
