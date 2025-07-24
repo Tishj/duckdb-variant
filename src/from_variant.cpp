@@ -75,10 +75,19 @@ string VariantLogicalTypeToString(VariantLogicalType type) {
 
 //! ------- Primitive Conversion Methods -------
 
+struct VariantBooleanConversion {
+	using type = bool;
+	static bool CanConvert(const VariantLogicalType type_id) {
+		return type_id == VariantLogicalType::BOOL_FALSE || type_id == VariantLogicalType::BOOL_TRUE;
+	}
+	static bool Convert(const VariantLogicalType type_id, uint32_t byte_offset, const_data_ptr_t value) {
+		return type_id == VariantLogicalType::BOOL_TRUE;
+	}
+};
+
 template <class T, VariantLogicalType TYPE_ID>
 struct VariantNumericConversion {
 	using type = T;
-	static const constexpr VariantLogicalType type_id = TYPE_ID;
 	static bool CanConvert(const VariantLogicalType type_id) {
 		if (TYPE_ID == type_id) {
 			//! Direct conversion always possible
@@ -95,16 +104,18 @@ struct VariantNumericConversion {
 };
 
 template <class T, class OP>
-static T FetchVariantValue(const VariantLogicalType type_id, uint32_t byte_offset, const_data_ptr_t value) {
+static bool FetchVariantValue(const VariantLogicalType type_id, uint32_t byte_offset, const_data_ptr_t value, T &ret,
+                              string &error) {
 	if (!OP::CanConvert(type_id)) {
-		throw ConversionException("Can't cast VARIANT value of type '%s' to '%s'", VariantLogicalTypeToString(type_id),
-		                          VariantLogicalTypeToString(OP::type_id));
+		error = StringUtil::Format("Can't convert from VARIANT(%s)", VariantLogicalTypeToString(type_id));
+		return false;
 	}
-	return OP::Convert(type_id, byte_offset, value);
+	ret = OP::Convert(type_id, byte_offset, value);
+	return true;
 }
 
 template <class OP, class T = typename OP::type>
-static void CastVariantToPrimitive(RecursiveUnifiedVectorFormat &variant, Vector &result, idx_t count) {
+static bool CastVariantToPrimitive(RecursiveUnifiedVectorFormat &variant, Vector &result, idx_t count, string &error) {
 	auto result_data = FlatVector::GetData<T>(result);
 	auto &values_format = UnifiedVariantVector::GetValues(variant);
 
@@ -126,7 +137,56 @@ static void CastVariantToPrimitive(RecursiveUnifiedVectorFormat &variant, Vector
 		auto type_id = static_cast<VariantLogicalType>(type_id_data[type_id_index]);
 		auto byte_offset = byte_offset_data[byte_offset_index];
 		auto value_blob_data = const_data_ptr_cast(value_data[value_index].GetData());
-		result_data[i] = FetchVariantValue<T, OP>(type_id, byte_offset, value_blob_data);
+		if (!FetchVariantValue<T, OP>(type_id, byte_offset, value_blob_data, result_data[i], error)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static bool CastVariant(RecursiveUnifiedVectorFormat &variant, Vector &result, idx_t count, string &error) {
+	auto &target_type = result.GetType();
+	switch (target_type.id()) {
+	case LogicalTypeId::BOOLEAN:
+		return CastVariantToPrimitive<VariantBooleanConversion>(variant, result, count, error);
+	case LogicalTypeId::TINYINT:
+		return CastVariantToPrimitive<VariantNumericConversion<int8_t, VariantLogicalType::INT8>>(variant, result,
+		                                                                                          count, error);
+	case LogicalTypeId::SMALLINT:
+		return CastVariantToPrimitive<VariantNumericConversion<int16_t, VariantLogicalType::INT16>>(variant, result,
+		                                                                                            count, error);
+	case LogicalTypeId::INTEGER:
+		return CastVariantToPrimitive<VariantNumericConversion<int32_t, VariantLogicalType::INT32>>(variant, result,
+		                                                                                            count, error);
+	case LogicalTypeId::BIGINT:
+		return CastVariantToPrimitive<VariantNumericConversion<int64_t, VariantLogicalType::INT64>>(variant, result,
+		                                                                                            count, error);
+	case LogicalTypeId::HUGEINT:
+		return CastVariantToPrimitive<VariantNumericConversion<hugeint_t, VariantLogicalType::INT128>>(variant, result,
+		                                                                                               count, error);
+	case LogicalTypeId::UTINYINT:
+		return CastVariantToPrimitive<VariantNumericConversion<uint8_t, VariantLogicalType::UINT8>>(variant, result,
+		                                                                                            count, error);
+	case LogicalTypeId::USMALLINT:
+		return CastVariantToPrimitive<VariantNumericConversion<uint16_t, VariantLogicalType::UINT16>>(variant, result,
+		                                                                                              count, error);
+	case LogicalTypeId::UINTEGER:
+		return CastVariantToPrimitive<VariantNumericConversion<uint32_t, VariantLogicalType::UINT32>>(variant, result,
+		                                                                                              count, error);
+	case LogicalTypeId::UBIGINT:
+		return CastVariantToPrimitive<VariantNumericConversion<uint64_t, VariantLogicalType::UINT64>>(variant, result,
+		                                                                                              count, error);
+	case LogicalTypeId::UHUGEINT:
+		return CastVariantToPrimitive<VariantNumericConversion<uhugeint_t, VariantLogicalType::UINT128>>(
+		    variant, result, count, error);
+	case LogicalTypeId::FLOAT:
+		return CastVariantToPrimitive<VariantNumericConversion<float, VariantLogicalType::FLOAT>>(variant, result,
+		                                                                                          count, error);
+	case LogicalTypeId::DOUBLE:
+		return CastVariantToPrimitive<VariantNumericConversion<double, VariantLogicalType::DOUBLE>>(variant, result,
+		                                                                                            count, error);
+	default:
+		return false;
 	}
 }
 
@@ -135,24 +195,18 @@ bool VariantFunctions::CastFromVARIANT(Vector &source, Vector &result, idx_t cou
 	RecursiveUnifiedVectorFormat source_format;
 	Vector::RecursiveToUnifiedFormat(source, count, source_format);
 
-	auto &target_type = result.GetType();
-	switch (target_type.id()) {
-	case LogicalTypeId::INTEGER: {
-		CastVariantToPrimitive<VariantNumericConversion<int32_t, VariantLogicalType::INT32>>(source_format, result,
-		                                                                                     count);
-		break;
-	}
-	case LogicalTypeId::BIGINT: {
-		CastVariantToPrimitive<VariantNumericConversion<int64_t, VariantLogicalType::INT64>>(source_format, result,
-		                                                                                     count);
-		break;
-	}
-	default:
-		throw NotImplementedException("Cast from VARIANT to '%s' not implemented", target_type.ToString());
-	}
-
+	string error;
+	auto success = CastVariant(source_format, result, count, error);
 	if (source.GetVectorType() == VectorType::CONSTANT_VECTOR) {
 		result.SetVectorType(VectorType::CONSTANT_VECTOR);
+	}
+	if (!success) {
+		auto conversion_error = StringUtil::Format("%s to '%s'", error, result.GetType().ToString());
+		if (parameters.error_message) {
+			*parameters.error_message = conversion_error;
+			return false;
+		}
+		throw ConversionException(conversion_error);
 	}
 	return true;
 }
