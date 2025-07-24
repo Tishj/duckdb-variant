@@ -344,8 +344,14 @@ bool VariantFunctions::CastJSONToVARIANT(Vector &source, Vector &result, idx_t c
 		state.Reset();
 	}
 
-	auto &keys_entry = ListVector::GetEntry(keys);
-	keys_entry.Slice(state.sel_vec, state.keys_count);
+	auto &dictionary = ListVector::GetEntry(keys);
+	auto dictionary_size = state.dictionary.size();
+
+	auto &sel = state.sel_vec;
+	auto sel_size = state.keys_count;
+
+	VariantVector::SortVariantKeys(dictionary, dictionary_size, sel, sel_size);
+	dictionary.Slice(state.sel_vec, state.keys_count);
 
 	if (source.GetVectorType() == VectorType::CONSTANT_VECTOR) {
 		result.SetVectorType(VectorType::CONSTANT_VECTOR);
