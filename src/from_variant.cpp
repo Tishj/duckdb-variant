@@ -262,6 +262,56 @@ static bool CollectNestedData(FromVariantConversionData &conversion_data, uint32
 	return true;
 }
 
+static bool FindValuesWithKey(FromVariantConversionData &conversion_data, idx_t dictionary_index, optional_idx row, uint32_t *res, VariantNestedData *nested_data, idx_t count) {
+	auto &source = conversion_data.unified_format;
+
+	//! children
+	auto &children = UnifiedVariantVector::GetChildren(source);
+	auto children_data = children.GetData<list_entry_t>(children);
+
+	//! value_ids
+	auto &value_ids = UnifiedVariantVector::GetChildrenValueId(source);
+	auto value_ids_data = value_ids.GetData<uint32_t>(value_ids);
+
+	//! key_ids
+	auto &key_ids = UnifiedVariantVector::GetChildrenKeyId(source);
+	auto key_ids_data = key_ids.GetData<uint32_t>(key_ids);
+
+	//! keys
+	auto &keys = UnifiedVariantVector::GetKeys(source);
+	auto keys_data = keys.GetData<list_entry_t>(keys);
+
+	//! entry of the keys list
+	auto &keys_entry = UnifiedVariantVector::GetKeysEntry(source);
+
+	for (idx_t i = 0; i < count; i++) {
+		auto row_index = row.IsValid() ? row.GetIndex() : i;
+
+		auto &keys_list_entry = keys_data[keys.sel->get_index(row_index)];
+		auto &children_list_entry = children_data[children.sel->get_index(row_index)];
+
+		auto &nested_data_entry = nested_data[i];
+		bool found_key = false;
+		for (idx_t child_idx = 0; child_idx < nested_data_entry.child_count; child_idx++) {
+			auto children_index = children_list_entry.offset + nested_data_entry.children_idx + child_idx;
+			auto key_id = key_ids_data[key_ids.sel->get_index(children_index)];
+			auto value_id = value_ids_data[value_ids.sel->get_index(children_index)];
+			auto key_index = keys_entry.sel->get_index(keys_list_entry.offset + key_id);
+
+			if (dictionary_index == key_index) {
+				//! Found the key we're looking for
+				res[i] = value_id;
+				found_key = true;
+				break;
+			}
+		}
+		if (!found_key) {
+			return false;
+		}
+	}
+	return true;
+}
+
 static bool CastVariant(FromVariantConversionData &conversion_data, uint32_t *child_idx, idx_t count,
                         optional_idx row) {
 	auto &result = conversion_data.result;
@@ -280,22 +330,23 @@ static bool CastVariant(FromVariantConversionData &conversion_data, uint32_t *ch
 				return false;
 			}
 
-			//! TODO: move this to the start of the conversion, we can traverse the type once and cache the mapping of:
-			//! struct key -> dictionary index Find the dictionary indices for all keys
 			auto &children = StructVector::GetEntries(result);
 			auto &child_types = StructType::GetChildTypes(target_type);
 
-			vector<uint32_t> dictionary_indices(children.size());
-			for (idx_t i = 0; i < child_types.size(); i++) {
-				auto &child_name = child_types[i].first;
-				if (false) {
-					error = StringUtil::Format("STRUCT key '%s' not present in VARIANT", child_name);
+			auto owned_value_indices = allocator.Allocate(sizeof(uint32_t) * count);
+			auto value_indices = reinterpret_cast<uint32_t *>(owned_value_indices.get());
+
+			for (idx_t child_idx = 0; child_idx < child_types.size(); child_idx++) {
+				auto &child_name = child_types[child_idx].first;
+				auto dictionary_index = conversion_data.mapping.at(child_name);
+
+				if (!FindValuesWithKey(conversion_data, dictionary_index, row, value_indices, child_data, count)) {
+					error = StringUtil::Format("VARIANT(OBJECT) is missing key '%s'");
 					return false;
 				}
 			}
 
-			error = "Can't convert VARIANT";
-			return false;
+			return true;
 		}
 		case LogicalTypeId::ARRAY:
 		case LogicalTypeId::LIST:
