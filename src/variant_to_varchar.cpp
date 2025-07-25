@@ -12,7 +12,7 @@
 
 namespace duckdb {
 
-static Value ConvertVariant(RecursiveUnifiedVectorFormat &source, idx_t row, idx_t values_idx) {
+Value VariantConversion::ConvertVariantToValue(RecursiveUnifiedVectorFormat &source, idx_t row, idx_t values_idx) {
 	//! values
 	auto &values = UnifiedVariantVector::GetValues(source);
 	auto values_data = values.GetData<list_entry_t>(values);
@@ -143,7 +143,7 @@ static Value ConvertVariant(RecursiveUnifiedVectorFormat &source, idx_t row, idx
 			for (idx_t i = 0; i < count; i++) {
 				auto index = value_ids.sel->get_index(children_list_entry.offset + child_index_start + i);
 				auto child_index = value_ids_data[index];
-				auto val = ConvertVariant(source, row, child_index);
+				auto val = ConvertVariantToValue(source, row, child_index);
 				children.push_back(val.ToString());
 			}
 		}
@@ -157,7 +157,7 @@ static Value ConvertVariant(RecursiveUnifiedVectorFormat &source, idx_t row, idx
 			for (idx_t i = 0; i < count; i++) {
 				auto children_index = value_ids.sel->get_index(children_list_entry.offset + child_index_start + i);
 				auto child_value_idx = value_ids_data[children_index];
-				auto val = ConvertVariant(source, row, child_value_idx);
+				auto val = ConvertVariantToValue(source, row, child_value_idx);
 
 				auto key_ids_index = key_ids.sel->get_index(children_list_entry.offset + child_index_start + i);
 				auto child_key_id = key_ids_data[key_ids_index];
@@ -181,7 +181,7 @@ bool VariantFunctions::CastVARIANTToVARCHAR(Vector &source, Vector &result, idx_
 	auto result_data = FlatVector::GetData<string_t>(result);
 	for (idx_t i = 0; i < count; i++) {
 
-		auto val = ConvertVariant(source_format, i, 0);
+		auto val = VariantConversion::ConvertVariantToValue(source_format, i, 0);
 		result_data[i] = StringVector::AddString(result, val.ToString());
 	}
 

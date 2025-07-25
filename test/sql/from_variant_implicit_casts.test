@@ -1,0 +1,30 @@
+# name: test/sql/to_variant.test
+# group: [sql]
+
+require variant
+
+require json
+
+# VARIANT(INT32) -> INTEGER
+query I
+select ['test', 'hello', 'world'][1::VARIANT::INTEGER]
+----
+test
+
+# VARIANT(INT32) -> BIGINT
+query I
+select ['test', 'hello', 'world'][1::VARIANT]
+----
+test
+
+# VARIANT(INT64) -> BIGINT
+query I
+select ['test', 'hello', 'world'][1::BIGINT::VARIANT]
+----
+test
+
+# VARIANT(VARCHAR) -> BOOL
+query I
+select 'true'::VARIANT::BOOL;
+----
+true

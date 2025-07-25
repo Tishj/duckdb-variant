@@ -116,6 +116,7 @@ static bool FetchVariantValue(const VariantLogicalType type_id, uint32_t byte_of
 
 template <class OP, class T = typename OP::type>
 static bool CastVariantToPrimitive(RecursiveUnifiedVectorFormat &variant, Vector &result, idx_t count, string &error) {
+	auto &target_type = result.GetType();
 	auto result_data = FlatVector::GetData<T>(result);
 	auto &values_format = UnifiedVariantVector::GetValues(variant);
 
@@ -138,7 +139,8 @@ static bool CastVariantToPrimitive(RecursiveUnifiedVectorFormat &variant, Vector
 		auto byte_offset = byte_offset_data[byte_offset_index];
 		auto value_blob_data = const_data_ptr_cast(value_data[value_index].GetData());
 		if (!FetchVariantValue<T, OP>(type_id, byte_offset, value_blob_data, result_data[i], error)) {
-			return false;
+			auto value = VariantConversion::ConvertVariantToValue(variant, 0, values_list_entry.offset + i);
+			result.SetValue(i, value.DefaultCastAs(target_type, true));
 		}
 	}
 	return true;

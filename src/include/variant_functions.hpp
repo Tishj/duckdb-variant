@@ -5,6 +5,10 @@
 
 namespace duckdb {
 
+struct VariantConversion {
+	static Value ConvertVariantToValue(RecursiveUnifiedVectorFormat &source, idx_t row, idx_t values_idx);
+};
+
 struct VariantFunctions {
 public:
 	//! Generic VARIANT -> LogicalTypeId::ANY
