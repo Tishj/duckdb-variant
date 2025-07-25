@@ -15,13 +15,6 @@ struct VariantNestedData {
 };
 
 struct FromVariantConversionData {
-public:
-	explicit FromVariantConversionData(Vector &result) : result(result) {
-	}
-
-public:
-	//! The Vector of arbitrary type to populate
-	Vector &result;
 	//! Mapping of struct keys -> dictionary index of the Variant 'keys'
 	unordered_map<string, idx_t> mapping;
 	//! The input Variant column
@@ -101,9 +94,9 @@ string VariantLogicalTypeToString(VariantLogicalType type) {
 	};
 }
 
-static bool FinalizeErrorMessage(FromVariantConversionData &conversion_data, CastParameters &parameters) {
+static bool FinalizeErrorMessage(FromVariantConversionData &conversion_data, Vector &result, CastParameters &parameters) {
 	auto conversion_error =
-	    StringUtil::Format("%s to '%s'", conversion_data.error, conversion_data.result.GetType().ToString());
+	    StringUtil::Format("%s to '%s'", conversion_data.error, result.GetType().ToString());
 	if (parameters.error_message) {
 		*parameters.error_message = conversion_error;
 		return false;
@@ -153,11 +146,11 @@ static bool FetchVariantValue(const VariantLogicalType type_id, uint32_t byte_of
 }
 
 template <class OP, class T = typename OP::type>
-static bool CastVariantToPrimitive(FromVariantConversionData &conversion_data, uint32_t *value_indices, idx_t count) {
-	auto &result = conversion_data.result;
+static bool CastVariantToPrimitive(FromVariantConversionData &conversion_data, Vector &result, uint32_t *value_indices, idx_t count) {
 	auto &variant = conversion_data.unified_format;
 
 	auto &target_type = result.GetType();
+
 	auto result_data = FlatVector::GetData<T>(result);
 	auto &values_format = UnifiedVariantVector::GetValues(variant);
 
@@ -296,8 +289,7 @@ static bool FindValuesWithKey(FromVariantConversionData &conversion_data, idx_t 
 	return true;
 }
 
-static bool CastVariant(FromVariantConversionData &conversion_data, uint32_t *value_indices, idx_t count, optional_idx row) {
-	auto &result = conversion_data.result;
+static bool CastVariant(FromVariantConversionData &conversion_data, Vector &result, uint32_t *value_indices, idx_t count, optional_idx row) {
 	auto &target_type = result.GetType();
 	auto &allocator = Allocator::DefaultAllocator();
 	auto &error = conversion_data.error;
@@ -328,7 +320,7 @@ static bool CastVariant(FromVariantConversionData &conversion_data, uint32_t *va
 					return false;
 				}
 				auto &child = *children[child_idx];
-				if (!CastVariant(conversion_data, new_value_indices, count, row)) {
+				if (!CastVariant(conversion_data, child, new_value_indices, count, row)) {
 					return false;
 				}
 			}
@@ -352,42 +344,42 @@ static bool CastVariant(FromVariantConversionData &conversion_data, uint32_t *va
 	} else {
 		switch (target_type.id()) {
 		case LogicalTypeId::BOOLEAN:
-			return CastVariantToPrimitive<VariantBooleanConversion>(conversion_data, value_indices, count);
+			return CastVariantToPrimitive<VariantBooleanConversion>(conversion_data, result, value_indices, count);
 		case LogicalTypeId::TINYINT:
-			return CastVariantToPrimitive<VariantNumericConversion<int8_t, VariantLogicalType::INT8>>(conversion_data, value_indices,
+			return CastVariantToPrimitive<VariantNumericConversion<int8_t, VariantLogicalType::INT8>>(conversion_data, result, value_indices,
 			                                                                                          count);
 		case LogicalTypeId::SMALLINT:
-			return CastVariantToPrimitive<VariantNumericConversion<int16_t, VariantLogicalType::INT16>>(conversion_data, value_indices,
+			return CastVariantToPrimitive<VariantNumericConversion<int16_t, VariantLogicalType::INT16>>(conversion_data, result, value_indices,
 			                                                                                            count);
 		case LogicalTypeId::INTEGER:
-			return CastVariantToPrimitive<VariantNumericConversion<int32_t, VariantLogicalType::INT32>>(conversion_data, value_indices,
+			return CastVariantToPrimitive<VariantNumericConversion<int32_t, VariantLogicalType::INT32>>(conversion_data, result, value_indices,
 			                                                                                            count);
 		case LogicalTypeId::BIGINT:
-			return CastVariantToPrimitive<VariantNumericConversion<int64_t, VariantLogicalType::INT64>>(conversion_data, value_indices,
+			return CastVariantToPrimitive<VariantNumericConversion<int64_t, VariantLogicalType::INT64>>(conversion_data, result, value_indices,
 			                                                                                            count);
 		case LogicalTypeId::HUGEINT:
 			return CastVariantToPrimitive<VariantNumericConversion<hugeint_t, VariantLogicalType::INT128>>(
-			    conversion_data, value_indices, count);
+			    conversion_data, result, value_indices, count);
 		case LogicalTypeId::UTINYINT:
-			return CastVariantToPrimitive<VariantNumericConversion<uint8_t, VariantLogicalType::UINT8>>(conversion_data, value_indices,
+			return CastVariantToPrimitive<VariantNumericConversion<uint8_t, VariantLogicalType::UINT8>>(conversion_data, result, value_indices,
 			                                                                                            count);
 		case LogicalTypeId::USMALLINT:
 			return CastVariantToPrimitive<VariantNumericConversion<uint16_t, VariantLogicalType::UINT16>>(
-			    conversion_data, value_indices, count);
+			    conversion_data, result, value_indices, count);
 		case LogicalTypeId::UINTEGER:
 			return CastVariantToPrimitive<VariantNumericConversion<uint32_t, VariantLogicalType::UINT32>>(
-			    conversion_data, value_indices, count);
+			    conversion_data, result, value_indices, count);
 		case LogicalTypeId::UBIGINT:
 			return CastVariantToPrimitive<VariantNumericConversion<uint64_t, VariantLogicalType::UINT64>>(
-			    conversion_data, value_indices, count);
+			    conversion_data, result, value_indices, count);
 		case LogicalTypeId::UHUGEINT:
 			return CastVariantToPrimitive<VariantNumericConversion<uhugeint_t, VariantLogicalType::UINT128>>(
-			    conversion_data, value_indices, count);
+			    conversion_data, result, value_indices, count);
 		case LogicalTypeId::FLOAT:
-			return CastVariantToPrimitive<VariantNumericConversion<float, VariantLogicalType::FLOAT>>(conversion_data, value_indices,
+			return CastVariantToPrimitive<VariantNumericConversion<float, VariantLogicalType::FLOAT>>(conversion_data, result, value_indices,
 			                                                                                          count);
 		case LogicalTypeId::DOUBLE:
-			return CastVariantToPrimitive<VariantNumericConversion<double, VariantLogicalType::DOUBLE>>(conversion_data, value_indices,
+			return CastVariantToPrimitive<VariantNumericConversion<double, VariantLogicalType::DOUBLE>>(conversion_data, result, value_indices,
 			                                                                                            count);
 		default:
 			error = "Can't convert VARIANT";
@@ -475,26 +467,26 @@ bool PopulateDictionaryMapping(Vector &source, FromVariantConversionData &conver
 
 bool VariantFunctions::CastFromVARIANT(Vector &source, Vector &result, idx_t count, CastParameters &parameters) {
 	D_ASSERT(source.GetType() == CreateVariantType());
-	FromVariantConversionData conversion_data(result);
+	FromVariantConversionData conversion_data;
 	Vector::RecursiveToUnifiedFormat(source, count, conversion_data.unified_format);
 	auto &allocator = Allocator::DefaultAllocator();
 
 	auto &target_type = result.GetType();
 	auto success = PopulateDictionaryMapping(source, conversion_data, target_type, count);
 	if (!success) {
-		return FinalizeErrorMessage(conversion_data, parameters);
+		return FinalizeErrorMessage(conversion_data, result, parameters);
 	}
 
 	auto owned_value_indices = allocator.Allocate(sizeof(uint32_t) * count);
 	auto value_indices = reinterpret_cast<uint32_t *>(owned_value_indices.get());
 	::bzero(value_indices, sizeof(uint32_t) * count);
 
-	success = CastVariant(conversion_data, value_indices, count, optional_idx());
+	success = CastVariant(conversion_data, result, value_indices, count, optional_idx());
 	if (source.GetVectorType() == VectorType::CONSTANT_VECTOR) {
 		result.SetVectorType(VectorType::CONSTANT_VECTOR);
 	}
 	if (!success) {
-		return FinalizeErrorMessage(conversion_data, parameters);
+		return FinalizeErrorMessage(conversion_data, result, parameters);
 	}
 	return true;
 }

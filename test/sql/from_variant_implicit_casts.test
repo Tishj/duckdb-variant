@@ -29,14 +29,14 @@ select 'true'::VARIANT::BOOL;
 ----
 true
 
-# VARIANT(OBJECT('a': 'true')) -> STRUCT(a BOOLEAN)
-statement error
-select {'a': 'true'}::VARIANT::STRUCT(a BOOLEAN);
-----
-Can't convert VARIANT to 'STRUCT(a BOOLEAN)'
-
-# VARIANT(OBJECT('a': 'true')) -> STRUCT(a BOOLEAN)
+# VARIANT(OBJECT('a': VARCHAR)) -> STRUCT(a BOOLEAN)
 query I
 select {'a': 'true'}::VARIANT::STRUCT(a BOOLEAN);
 ----
-true
+{'a': true}
+
+# VARIANT(OBJECT('a': VARCHAR)) -> STRUCT(a BOOLEAN)
+statement error
+select {'a': 'lalala'}::VARIANT::STRUCT(a BOOLEAN);
+----
+Invalid Input Error: Failed to cast value: Could not convert string 'lalala' to BOOL
