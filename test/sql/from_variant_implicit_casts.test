@@ -57,3 +57,4 @@ Invalid Input Error: Failed to cast value: Could not convert string 'lalala' to 
 query I
 select '2019/03/21'::TIMESTAMP::VARIANT::TIMESTAMP;
 ----
+2019-03-21 00:00:00

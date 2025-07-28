@@ -23,6 +23,19 @@ struct FromVariantConversionData {
 	string error;
 };
 
+struct EmptyConversionPayload {};
+
+//! decimal
+struct DecimalConversionPayload {
+public:
+	DecimalConversionPayload(idx_t width, idx_t scale) : width(width), scale(scale) {
+	}
+
+public:
+	idx_t width;
+	idx_t scale;
+};
+
 } // namespace
 
 string VariantLogicalTypeToString(VariantLogicalType type) {
@@ -108,46 +121,38 @@ static bool FinalizeErrorMessage(FromVariantConversionData &conversion_data, Vec
 
 struct VariantBooleanConversion {
 	using type = bool;
-	static bool CanConvert(const VariantLogicalType type_id) {
+	static bool CanConvert(const VariantLogicalType type_id, const EmptyConversionPayload &payload) {
 		return type_id == VariantLogicalType::BOOL_FALSE || type_id == VariantLogicalType::BOOL_TRUE;
 	}
-	static bool Convert(const VariantLogicalType type_id, uint32_t byte_offset, const_data_ptr_t value) {
+	static bool Convert(const VariantLogicalType type_id, uint32_t byte_offset, const_data_ptr_t value, const EmptyConversionPayload &payload) {
 		return type_id == VariantLogicalType::BOOL_TRUE;
 	}
 };
 
 template <class T, VariantLogicalType TYPE_ID>
-struct VariantNumericConversion {
+struct VariantDirectConversion {
 	using type = T;
-	static bool CanConvert(const VariantLogicalType type_id) {
-		if (TYPE_ID == type_id) {
-			//! Direct conversion always possible
-			return true;
-		}
-		//! TODO: implement a subset of MaxLogicalType to determine whether the stored VARIANT type can be upcast to the
-		//! target type.
-		return false;
+	static bool CanConvert(const VariantLogicalType type_id, const EmptyConversionPayload &payload) {
+		return TYPE_ID == type_id;
 	}
-	static T Convert(const VariantLogicalType type_id, uint32_t byte_offset, const_data_ptr_t value) {
+	static T Convert(const VariantLogicalType type_id, uint32_t byte_offset, const_data_ptr_t value, const EmptyConversionPayload &payload) {
 		D_ASSERT(type_id == TYPE_ID);
 		return Load<T>(value + byte_offset);
 	}
 };
 
-template <class T, class OP>
-static bool FetchVariantValue(const VariantLogicalType type_id, uint32_t byte_offset, const_data_ptr_t value, T &ret,
-                              string &error) {
-	if (!OP::CanConvert(type_id)) {
+template <class T, class OP, class PAYLOAD_CLASS>
+static bool FetchVariantValue(const VariantLogicalType type_id, uint32_t byte_offset, const_data_ptr_t value, T &ret, string &error, PAYLOAD_CLASS payload) {
+	if (!OP::CanConvert(type_id, payload)) {
 		error = StringUtil::Format("Can't convert from VARIANT(%s)", VariantLogicalTypeToString(type_id));
 		return false;
 	}
-	ret = OP::Convert(type_id, byte_offset, value);
+	ret = OP::Convert(type_id, byte_offset, value, payload);
 	return true;
 }
 
-template <class OP, class T = typename OP::type>
-static bool CastVariantToPrimitive(FromVariantConversionData &conversion_data, Vector &result, uint32_t *value_indices,
-                                   idx_t count) {
+template <class OP, class T = typename OP::type, class PAYLOAD_CLASS>
+static bool CastVariantToPrimitive(FromVariantConversionData &conversion_data, Vector &result, uint32_t *value_indices, idx_t count, PAYLOAD_CLASS payload) {
 	auto &variant = conversion_data.unified_format;
 
 	auto &target_type = result.GetType();
@@ -180,7 +185,7 @@ static bool CastVariantToPrimitive(FromVariantConversionData &conversion_data, V
 			    StringUtil::Format("Can't convert VARIANT(%s)", VariantLogicalTypeToString(type_id));
 			return false;
 		}
-		if (!FetchVariantValue<T, OP>(type_id, byte_offset, value_blob_data, result_data[i], conversion_data.error)) {
+		if (!FetchVariantValue<T, OP, PAYLOAD_CLASS>(type_id, byte_offset, value_blob_data, result_data[i], conversion_data.error, payload)) {
 			auto value = VariantConversion::ConvertVariantToValue(conversion_data.unified_format, 0, value_index);
 			result.SetValue(i, value.DefaultCastAs(target_type, true));
 		}
@@ -293,7 +298,7 @@ static bool FindValuesWithKey(FromVariantConversionData &conversion_data, idx_t 
 
 //! * @param conversion_data The constant data relevant at all rows of the conversion
 //! * @param result The typed Vector to populate in this call
-//! * @param value_indices The array of `count` size, containing the indices into `values` to convert
+//! * @param value_indices The array of `count` size, containing the (relative, without row offset applied) indices into `values` to convert
 //! * @param row The row of the Variant to pull data from, if 'IsValid()' is true
 static bool CastVariant(FromVariantConversionData &conversion_data, Vector &result, uint32_t *value_indices,
                         idx_t count, optional_idx row) {
@@ -352,57 +357,58 @@ static bool CastVariant(FromVariantConversionData &conversion_data, Vector &resu
 		}
 		};
 	} else {
+		EmptyConversionPayload empty_payload;
 		switch (target_type.id()) {
 		case LogicalTypeId::BOOLEAN:
-			return CastVariantToPrimitive<VariantBooleanConversion>(conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantBooleanConversion>(conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::TINYINT:
-			return CastVariantToPrimitive<VariantNumericConversion<int8_t, VariantLogicalType::INT8>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<int8_t, VariantLogicalType::INT8>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::SMALLINT:
-			return CastVariantToPrimitive<VariantNumericConversion<int16_t, VariantLogicalType::INT16>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<int16_t, VariantLogicalType::INT16>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::INTEGER:
-			return CastVariantToPrimitive<VariantNumericConversion<int32_t, VariantLogicalType::INT32>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<int32_t, VariantLogicalType::INT32>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::BIGINT:
-			return CastVariantToPrimitive<VariantNumericConversion<int64_t, VariantLogicalType::INT64>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<int64_t, VariantLogicalType::INT64>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::HUGEINT:
-			return CastVariantToPrimitive<VariantNumericConversion<hugeint_t, VariantLogicalType::INT128>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<hugeint_t, VariantLogicalType::INT128>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::UTINYINT:
-			return CastVariantToPrimitive<VariantNumericConversion<uint8_t, VariantLogicalType::UINT8>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<uint8_t, VariantLogicalType::UINT8>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::USMALLINT:
-			return CastVariantToPrimitive<VariantNumericConversion<uint16_t, VariantLogicalType::UINT16>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<uint16_t, VariantLogicalType::UINT16>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::UINTEGER:
-			return CastVariantToPrimitive<VariantNumericConversion<uint32_t, VariantLogicalType::UINT32>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<uint32_t, VariantLogicalType::UINT32>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::UBIGINT:
-			return CastVariantToPrimitive<VariantNumericConversion<uint64_t, VariantLogicalType::UINT64>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<uint64_t, VariantLogicalType::UINT64>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::UHUGEINT:
-			return CastVariantToPrimitive<VariantNumericConversion<uhugeint_t, VariantLogicalType::UINT128>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<uhugeint_t, VariantLogicalType::UINT128>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::FLOAT:
-			return CastVariantToPrimitive<VariantNumericConversion<float, VariantLogicalType::FLOAT>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<float, VariantLogicalType::FLOAT>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::DOUBLE:
-			return CastVariantToPrimitive<VariantNumericConversion<double, VariantLogicalType::DOUBLE>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<double, VariantLogicalType::DOUBLE>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::DATE:
-			return CastVariantToPrimitive<VariantNumericConversion<date_t, VariantLogicalType::DATE>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<date_t, VariantLogicalType::DATE>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::TIMESTAMP:
-			return CastVariantToPrimitive<VariantNumericConversion<timestamp_t, VariantLogicalType::TIMESTAMP_MICROS>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<timestamp_t, VariantLogicalType::TIMESTAMP_MICROS>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::BLOB:
-			return CastVariantToPrimitive<VariantNumericConversion<string_t, VariantLogicalType::BLOB>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<string_t, VariantLogicalType::BLOB>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::INTERVAL:
-			return CastVariantToPrimitive<VariantNumericConversion<interval_t, VariantLogicalType::INTERVAL>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<interval_t, VariantLogicalType::INTERVAL>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::DECIMAL: {
 			auto physical_type = target_type.InternalType();
 			uint8_t width;
@@ -411,35 +417,35 @@ static bool CastVariant(FromVariantConversionData &conversion_data, Vector &resu
 
 			switch (physical_type) {
 			case PhysicalType::INT16:
-				return CastVariantToPrimitive<VariantNumericConversion<int16_t, VariantLogicalType::DECIMAL>>(
-				    conversion_data, result, value_indices, count);
+				return CastVariantToPrimitive<VariantDirectConversion<int16_t, VariantLogicalType::DECIMAL>>(
+				    conversion_data, result, value_indices, count, empty_payload);
 			case PhysicalType::INT32:
-				return CastVariantToPrimitive<VariantNumericConversion<int32_t, VariantLogicalType::DECIMAL>>(
-				    conversion_data, result, value_indices, count);
+				return CastVariantToPrimitive<VariantDirectConversion<int32_t, VariantLogicalType::DECIMAL>>(
+				    conversion_data, result, value_indices, count, empty_payload);
 			case PhysicalType::INT64:
-				return CastVariantToPrimitive<VariantNumericConversion<int64_t, VariantLogicalType::DECIMAL>>(
-				    conversion_data, result, value_indices, count);
+				return CastVariantToPrimitive<VariantDirectConversion<int64_t, VariantLogicalType::DECIMAL>>(
+				    conversion_data, result, value_indices, count, empty_payload);
 			case PhysicalType::INT128:
-				return CastVariantToPrimitive<VariantNumericConversion<hugeint_t, VariantLogicalType::DECIMAL>>(
-				    conversion_data, result, value_indices, count);
+				return CastVariantToPrimitive<VariantDirectConversion<hugeint_t, VariantLogicalType::DECIMAL>>(
+				    conversion_data, result, value_indices, count, empty_payload);
 			default:
 				throw NotImplementedException("Can't convert VARIANT to DECIMAL value of physical type: %s",
 				                              EnumUtil::ToString(physical_type));
 			};
 		}
 		case LogicalTypeId::TIME:
-			return CastVariantToPrimitive<VariantNumericConversion<dtime_t, VariantLogicalType::TIME_MICROS>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<dtime_t, VariantLogicalType::TIME_MICROS>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::TIME_TZ:
-			return CastVariantToPrimitive<VariantNumericConversion<dtime_tz_t, VariantLogicalType::TIME_MICROS_TZ>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<dtime_tz_t, VariantLogicalType::TIME_MICROS_TZ>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::TIMESTAMP_TZ:
 			return CastVariantToPrimitive<
-			    VariantNumericConversion<timestamp_tz_t, VariantLogicalType::TIMESTAMP_MICROS_TZ>>(
-			    conversion_data, result, value_indices, count);
+			    VariantDirectConversion<timestamp_tz_t, VariantLogicalType::TIMESTAMP_MICROS_TZ>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::UUID:
-			return CastVariantToPrimitive<VariantNumericConversion<hugeint_t, VariantLogicalType::UUID>>(
-			    conversion_data, result, value_indices, count);
+			return CastVariantToPrimitive<VariantDirectConversion<hugeint_t, VariantLogicalType::UUID>>(
+			    conversion_data, result, value_indices, count, empty_payload);
 		case LogicalTypeId::BIT:
 		case LogicalTypeId::VARINT:
 		default:
