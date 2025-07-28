@@ -82,3 +82,9 @@ query I
 select 'thisisalongblob\x00withnullbytes'::BLOB::VARIANT::VARCHAR;
 ----
 thisisalongblob\x00withnullbytes
+
+# Added a fallback for nested types as well
+query I
+select {'a': '[1, 2, 3, 4]'}::VARIANT::STRUCT(a INTEGER[])
+----
+{'a': [1, 2, 3, 4]}

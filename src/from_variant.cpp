@@ -158,7 +158,8 @@ struct VariantDirectConversion {
 		return true;
 	}
 
-	static bool Convert(const VariantLogicalType type_id, uint32_t byte_offset, const_data_ptr_t value, T &ret, const StringConversionPayload &payload, string &error) {
+	static bool Convert(const VariantLogicalType type_id, uint32_t byte_offset, const_data_ptr_t value, T &ret,
+	                    const StringConversionPayload &payload, string &error) {
 		if (type_id != TYPE_ID) {
 			error = StringUtil::Format("Can't convert from VARIANT(%s)", VariantLogicalTypeToString(type_id));
 			return false;
@@ -193,13 +194,6 @@ struct VariantDecimalConversion {
 		return true;
 	}
 };
-
-//! This whole method is redundant, no?
-template <class T, class OP, class PAYLOAD_CLASS>
-static bool FetchVariantValue(const VariantLogicalType type_id, uint32_t byte_offset, const_data_ptr_t value, T &ret,
-                              string &error, PAYLOAD_CLASS payload) {
-	return OP::Convert(type_id, byte_offset, value, ret, payload, error);
-}
 
 template <class OP, class T = typename OP::type, class PAYLOAD_CLASS>
 static bool CastVariantToPrimitive(FromVariantConversionData &conversion_data, Vector &result, uint32_t *value_indices,
@@ -236,8 +230,7 @@ static bool CastVariantToPrimitive(FromVariantConversionData &conversion_data, V
 			    StringUtil::Format("Can't convert VARIANT(%s)", VariantLogicalTypeToString(type_id));
 			return false;
 		}
-		if (!FetchVariantValue<T, OP, PAYLOAD_CLASS>(type_id, byte_offset, value_blob_data, result_data[i],
-		                                             conversion_data.error, payload)) {
+		if (!OP::Convert(type_id, byte_offset, value_blob_data, result_data[i], payload, conversion_data.error)) {
 			auto value = VariantConversion::ConvertVariantToValue(conversion_data.unified_format, 0, value_index);
 			result.SetValue(i, value.DefaultCastAs(target_type, true));
 		}
@@ -348,6 +341,109 @@ static bool FindValuesWithKey(FromVariantConversionData &conversion_data, idx_t 
 	return true;
 }
 
+static bool FindValues(FromVariantConversionData &conversion_data, idx_t row_index, uint32_t *res,
+                       VariantNestedData &nested_data_entry) {
+	auto &source = conversion_data.unified_format;
+
+	//! children
+	auto &children = UnifiedVariantVector::GetChildren(source);
+	auto children_data = children.GetData<list_entry_t>(children);
+
+	//! value_ids
+	auto &value_ids = UnifiedVariantVector::GetChildrenValueId(source);
+	auto value_ids_data = value_ids.GetData<uint32_t>(value_ids);
+
+	auto &children_list_entry = children_data[children.sel->get_index(row_index)];
+	for (idx_t child_idx = 0; child_idx < nested_data_entry.child_count; child_idx++) {
+		auto children_index = children_list_entry.offset + nested_data_entry.children_idx + child_idx;
+		auto value_id = value_ids_data[value_ids.sel->get_index(children_index)];
+		res[child_idx] = value_id;
+	}
+	return true;
+}
+
+static bool CastVariant(FromVariantConversionData &conversion_data, Vector &result, uint32_t *value_indices,
+                        idx_t count, optional_idx row);
+
+static bool ConvertVariantToList(FromVariantConversionData &conversion_data, Vector &result, uint32_t *value_indices,
+                                 idx_t count, optional_idx row) {
+	auto &allocator = Allocator::DefaultAllocator();
+	auto owned_child_data = allocator.Allocate(sizeof(VariantNestedData) * count);
+	auto child_data = reinterpret_cast<VariantNestedData *>(owned_child_data.get());
+
+	if (!CollectNestedData<VariantLogicalType::ARRAY>(conversion_data, value_indices, count, row, child_data)) {
+		return false;
+	}
+	idx_t total_children = 0;
+	idx_t max_children = 0;
+	for (idx_t i = 0; i < count; i++) {
+		auto &child_data_entry = child_data[i];
+		if (child_data_entry.child_count > max_children) {
+			max_children = child_data_entry.child_count;
+		}
+		total_children += child_data_entry.child_count;
+	}
+
+	auto owned_value_indices = allocator.Allocate(sizeof(uint32_t) * max_children);
+	auto new_value_indices = reinterpret_cast<uint32_t *>(owned_value_indices.get());
+
+	ListVector::Reserve(result, total_children);
+	auto &child = ListVector::GetEntry(result);
+	auto list_data = ListVector::GetData(result);
+	idx_t offset = 0;
+	for (idx_t i = 0; i < count; i++) {
+		auto row_index = row.IsValid() ? row.GetIndex() : i;
+		auto &child_data_entry = child_data[i];
+
+		auto &entry = list_data[i];
+		entry.offset = offset;
+		entry.length = child_data_entry.child_count;
+		offset += entry.length;
+
+		FindValues(conversion_data, row_index, new_value_indices, child_data_entry);
+		CastVariant(conversion_data, child, new_value_indices, child_data_entry.child_count, row_index);
+	}
+	ListVector::SetListSize(result, total_children);
+	return true;
+}
+
+static bool ConvertVariantToStruct(FromVariantConversionData &conversion_data, Vector &result, uint32_t *value_indices,
+                                   idx_t count, optional_idx row) {
+	auto &target_type = result.GetType();
+	auto &allocator = Allocator::DefaultAllocator();
+	auto owned_child_data = allocator.Allocate(sizeof(VariantNestedData) * count);
+	auto child_data = reinterpret_cast<VariantNestedData *>(owned_child_data.get());
+
+	//! First get all the Object data from the VARIANT
+	if (!CollectNestedData<VariantLogicalType::OBJECT>(conversion_data, value_indices, count, row, child_data)) {
+		return false;
+	}
+
+	auto &children = StructVector::GetEntries(result);
+	auto &child_types = StructType::GetChildTypes(target_type);
+
+	auto owned_value_indices = allocator.Allocate(sizeof(uint32_t) * count);
+	auto new_value_indices = reinterpret_cast<uint32_t *>(owned_value_indices.get());
+
+	for (idx_t child_idx = 0; child_idx < child_types.size(); child_idx++) {
+		auto &child_name = child_types[child_idx].first;
+		auto dictionary_index = conversion_data.mapping.at(child_name);
+
+		//! Then find the relevant child of the OBJECTs we're converting
+		//! FIXME: there is nothing preventing an OBJECT from containing the same key twice I believe ?
+		if (!FindValuesWithKey(conversion_data, dictionary_index, row, new_value_indices, child_data, count)) {
+			conversion_data.error = StringUtil::Format("VARIANT(OBJECT) is missing key '%s'");
+			return false;
+		}
+		//! Now cast all the values we found to the target type
+		auto &child = *children[child_idx];
+		if (!CastVariant(conversion_data, child, new_value_indices, count, row)) {
+			return false;
+		}
+	}
+	return true;
+}
+
 //! * @param conversion_data The constant data relevant at all rows of the conversion
 //! * @param result The typed Vector to populate in this call
 //! * @param value_indices The array of `count` size, containing the (relative, without row offset applied) indices into
@@ -356,49 +452,42 @@ static bool FindValuesWithKey(FromVariantConversionData &conversion_data, idx_t 
 static bool CastVariant(FromVariantConversionData &conversion_data, Vector &result, uint32_t *value_indices,
                         idx_t count, optional_idx row) {
 	auto &target_type = result.GetType();
-	auto &allocator = Allocator::DefaultAllocator();
 	auto &error = conversion_data.error;
 
 	if (target_type.IsNested()) {
-		auto owned_child_data = allocator.Allocate(sizeof(VariantNestedData) * count);
-		auto child_data = reinterpret_cast<VariantNestedData *>(owned_child_data.get());
-
 		switch (target_type.id()) {
 		case LogicalTypeId::STRUCT: {
-			//! First get all the Object data from the VARIANT
-			if (!CollectNestedData<VariantLogicalType::OBJECT>(conversion_data, value_indices, count, row,
-			                                                   child_data)) {
-				return false;
+			if (ConvertVariantToStruct(conversion_data, result, value_indices, count, row)) {
+				return true;
 			}
 
-			auto &children = StructVector::GetEntries(result);
-			auto &child_types = StructType::GetChildTypes(target_type);
+			for (idx_t i = 0; i < count; i++) {
+				auto row_index = row.IsValid() ? row.GetIndex() : i;
 
-			auto owned_value_indices = allocator.Allocate(sizeof(uint32_t) * count);
-			auto new_value_indices = reinterpret_cast<uint32_t *>(owned_value_indices.get());
-
-			for (idx_t child_idx = 0; child_idx < child_types.size(); child_idx++) {
-				auto &child_name = child_types[child_idx].first;
-				auto dictionary_index = conversion_data.mapping.at(child_name);
-
-				//! FIXME: there is nothing preventing an OBJECT containing the same key twice I believe ?
-				//! Then find the relevant child of the OBJECTs we're converting
-				if (!FindValuesWithKey(conversion_data, dictionary_index, row, new_value_indices, child_data, count)) {
-					error = StringUtil::Format("VARIANT(OBJECT) is missing key '%s'");
-					return false;
-				}
-				auto &child = *children[child_idx];
-				if (!CastVariant(conversion_data, child, new_value_indices, count, row)) {
-					return false;
-				}
+				//! Get the index into 'values'
+				uint32_t value_index = value_indices[i];
+				auto value =
+				    VariantConversion::ConvertVariantToValue(conversion_data.unified_format, row_index, value_index);
+				result.SetValue(i, value.DefaultCastAs(target_type, true));
 			}
 			return true;
 		}
 		case LogicalTypeId::ARRAY:
 		case LogicalTypeId::LIST:
 		case LogicalTypeId::MAP: {
-			error = "Can't convert VARIANT";
-			return false;
+			if (ConvertVariantToList(conversion_data, result, value_indices, count, row)) {
+				return true;
+			}
+			for (idx_t i = 0; i < count; i++) {
+				auto row_index = row.IsValid() ? row.GetIndex() : i;
+
+				//! Get the index into 'values'
+				uint32_t value_index = value_indices[i];
+				auto value =
+				    VariantConversion::ConvertVariantToValue(conversion_data.unified_format, row_index, value_index);
+				result.SetValue(i, value.DefaultCastAs(target_type, true));
+			}
+			return true;
 		}
 		case LogicalTypeId::UNION: {
 			error = "Can't convert VARIANT";
@@ -460,6 +549,11 @@ static bool CastVariant(FromVariantConversionData &conversion_data, Vector &resu
 		case LogicalTypeId::BLOB: {
 			StringConversionPayload string_payload(result);
 			return CastVariantToPrimitive<VariantDirectConversion<string_t, VariantLogicalType::BLOB>>(
+			    conversion_data, result, value_indices, count, string_payload);
+		}
+		case LogicalTypeId::VARCHAR: {
+			StringConversionPayload string_payload(result);
+			return CastVariantToPrimitive<VariantDirectConversion<string_t, VariantLogicalType::VARCHAR>>(
 			    conversion_data, result, value_indices, count, string_payload);
 		}
 		case LogicalTypeId::INTERVAL:
@@ -596,8 +690,8 @@ bool VariantFunctions::CastFromVARIANT(Vector &source, Vector &result, idx_t cou
 	FromVariantConversionData conversion_data;
 	Vector::RecursiveToUnifiedFormat(source, count, conversion_data.unified_format);
 	auto &allocator = Allocator::DefaultAllocator();
-
 	auto &target_type = result.GetType();
+
 	auto success = PopulateDictionaryMapping(source, conversion_data, target_type, count);
 	if (!success) {
 		return FinalizeErrorMessage(conversion_data, result, parameters);
