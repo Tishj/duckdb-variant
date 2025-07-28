@@ -58,3 +58,15 @@ query I
 select '2019/03/21'::TIMESTAMP::VARIANT::TIMESTAMP;
 ----
 2019-03-21 00:00:00
+
+# Direct conversion
+query I
+select '0.123456789'::DECIMAL(10,9)::VARIANT::DECIMAL(10,9)
+----
+0.123456789
+
+# Fallback conversion using Value
+query I
+select '0.123456789'::DECIMAL(10,9)::VARIANT::DECIMAL(10,8)
+----
+0.12345679
