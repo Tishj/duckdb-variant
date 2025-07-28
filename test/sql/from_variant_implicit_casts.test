@@ -94,3 +94,51 @@ query I
 select {'a': ['1', '2', '3', '4']}::VARIANT::STRUCT(a INTEGER[])
 ----
 {'a': [1, 2, 3, 4]}
+
+statement ok
+create table struct_cast_tbl(a STRUCT(a VARCHAR));
+
+statement ok
+insert into struct_cast_tbl select {'a': '[1, 2, 3, 4]'};
+
+statement ok
+insert into struct_cast_tbl select {'a': '[8, 7, 6]'};
+
+statement ok
+insert into struct_cast_tbl select {'a': '[]'};
+
+statement ok
+insert into struct_cast_tbl select {'a': '[10, 6, 4, 8, 9, 10, 12]'};
+
+# Added a fallback for nested types as well
+query I
+select a::VARIANT::STRUCT(a INTEGER[]) from struct_cast_tbl;
+----
+{'a': [1, 2, 3, 4]}
+{'a': [8, 7, 6]}
+{'a': []}
+{'a': [10, 6, 4, 8, 9, 10, 12]}
+
+statement ok
+create table struct_cast_tbl2(a STRUCT(a INTEGER[]));
+
+statement ok
+insert into struct_cast_tbl2 select {'a': [1, 2, 3, 4]};
+
+statement ok
+insert into struct_cast_tbl2 select {'a': [8, 7, 6]};
+
+statement ok
+insert into struct_cast_tbl2 select {'a': []};
+
+statement ok
+insert into struct_cast_tbl2 select {'a': [10, 6, 4, 8, 9, 10, 12]};
+
+# Added a fallback for nested types as well
+query I
+select a::VARIANT::STRUCT(a INTEGER[]) from struct_cast_tbl2;
+----
+{'a': [1, 2, 3, 4]}
+{'a': [8, 7, 6]}
+{'a': []}
+{'a': [10, 6, 4, 8, 9, 10, 12]}

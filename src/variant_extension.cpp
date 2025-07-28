@@ -110,7 +110,6 @@ static void LoadInternal(ExtensionLoader &loader) {
 		case LogicalTypeId::ARRAY:
 			source_type = LogicalType::ARRAY(LogicalType::ANY, optional_idx());
 			break;
-		case LogicalTypeId::VARCHAR:
 		case LogicalTypeId::VARINT:
 		case LogicalTypeId::BIT:
 			//! TODO: we can't currently represent VARINT / BIT in a Variant
@@ -119,7 +118,9 @@ static void LoadInternal(ExtensionLoader &loader) {
 			source_type = type;
 		}
 		casts.RegisterCastFunction(source_type, variant_type, VariantFunctions::CastToVARIANT, 5);
-		casts.RegisterCastFunction(variant_type, source_type, VariantFunctions::CastFromVARIANT, 5);
+		if (type.id() != LogicalTypeId::VARCHAR) {
+			casts.RegisterCastFunction(variant_type, source_type, VariantFunctions::CastFromVARIANT, 5);
+		}
 	}
 }
 
