@@ -70,3 +70,15 @@ query I
 select '0.123456789'::DECIMAL(10,9)::VARIANT::DECIMAL(10,8)
 ----
 0.12345679
+
+# Direct conversion from VARIANT(BLOB) -> BLOB
+query I
+select 'thisisalongblob\x00withnullbytes'::BLOB::VARIANT::BLOB;
+----
+thisisalongblob\x00withnullbytes
+
+# Fallback conversion from VARIANT(BLOB) -> VARCHAR
+query I
+select 'thisisalongblob\x00withnullbytes'::BLOB::VARIANT::VARCHAR;
+----
+thisisalongblob\x00withnullbytes

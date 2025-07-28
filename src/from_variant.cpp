@@ -25,6 +25,17 @@ struct FromVariantConversionData {
 
 struct EmptyConversionPayload {};
 
+//! string data
+struct StringConversionPayload {
+public:
+	explicit StringConversionPayload(Vector &vec) : vec(vec) {
+	}
+
+public:
+	//! The string vector that needs to own the non-inlined data
+	Vector &vec;
+};
+
 //! decimal
 struct DecimalConversionPayload {
 public:
@@ -144,6 +155,17 @@ struct VariantDirectConversion {
 			return false;
 		}
 		ret = Load<T>(value + byte_offset);
+		return true;
+	}
+
+	static bool Convert(const VariantLogicalType type_id, uint32_t byte_offset, const_data_ptr_t value, T &ret, const StringConversionPayload &payload, string &error) {
+		if (type_id != TYPE_ID) {
+			error = StringUtil::Format("Can't convert from VARIANT(%s)", VariantLogicalTypeToString(type_id));
+			return false;
+		}
+		auto ptr = value + byte_offset;
+		auto length = VarintDecode<idx_t>(ptr);
+		ret = StringVector::AddStringOrBlob(payload.vec, reinterpret_cast<const char *>(ptr), length);
 		return true;
 	}
 };
@@ -435,9 +457,11 @@ static bool CastVariant(FromVariantConversionData &conversion_data, Vector &resu
 		case LogicalTypeId::TIMESTAMP:
 			return CastVariantToPrimitive<VariantDirectConversion<timestamp_t, VariantLogicalType::TIMESTAMP_MICROS>>(
 			    conversion_data, result, value_indices, count, empty_payload);
-		case LogicalTypeId::BLOB:
+		case LogicalTypeId::BLOB: {
+			StringConversionPayload string_payload(result);
 			return CastVariantToPrimitive<VariantDirectConversion<string_t, VariantLogicalType::BLOB>>(
-			    conversion_data, result, value_indices, count, empty_payload);
+			    conversion_data, result, value_indices, count, string_payload);
+		}
 		case LogicalTypeId::INTERVAL:
 			return CastVariantToPrimitive<VariantDirectConversion<interval_t, VariantLogicalType::INTERVAL>>(
 			    conversion_data, result, value_indices, count, empty_payload);
