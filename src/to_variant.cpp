@@ -872,7 +872,8 @@ static void InitializeOffsets(DataChunk &offsets, idx_t count) {
 	}
 }
 
-static void InitializeVariants(DataChunk &offsets, Vector &result, SelectionVector &keys_selvec, idx_t &selvec_size, StringDictionary &dictionary) {
+static void InitializeVariants(DataChunk &offsets, Vector &result, SelectionVector &keys_selvec, idx_t &selvec_size,
+                               StringDictionary &dictionary) {
 	auto &keys = VariantVector::GetKeys(result);
 	auto keys_data = ListVector::GetData(keys);
 

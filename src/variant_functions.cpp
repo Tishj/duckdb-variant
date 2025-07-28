@@ -43,12 +43,12 @@ public:
 		//! Update the total count
 		value_count += row_value_count;
 		children_count += row_children_count;
-		keys_count += row_keys_count;
+		keys_count += key_ids.size();
 
 		//! Reset the row-local counts
 		row_value_count = 0;
 		row_children_count = 0;
-		row_keys_count = 0;
+		key_ids.clear();
 	}
 
 public:
@@ -57,6 +57,7 @@ public:
 
 		uint32_t dict_index;
 		if (it == dictionary.end()) {
+			//! Key does not exist in the global dictionary yet
 			auto vec_data = FlatVector::GetData<string_t>(vec);
 			auto dict_count = dictionary.size();
 			if (dict_count >= dictionary_capacity) {
@@ -68,7 +69,14 @@ public:
 			it = dictionary.emplace(vec_data[dict_count], dict_count).first;
 		}
 		dict_index = it->second;
-		auto keys_idx = keys_count + row_keys_count++;
+
+		auto local_it = key_ids.find(str);
+		if (local_it == key_ids.end()) {
+			auto vec_data = FlatVector::GetData<string_t>(vec);
+			local_it = key_ids.emplace(vec_data[dict_index], key_ids.size()).first;
+		}
+
+		auto keys_idx = keys_count + local_it->second;
 		if (!sel_vec_capacity || keys_idx >= sel_vec_capacity) {
 			//! Reinitialize the selection vector
 			auto new_capacity = !sel_vec_capacity ? STANDARD_VECTOR_SIZE : NextPowerOfTwo(sel_vec_capacity + 1);
@@ -78,7 +86,7 @@ public:
 			sel_vec_capacity = new_capacity;
 		}
 		sel_vec.set_index(keys_idx, dict_index);
-		return keys_idx;
+		return local_it->second;
 	}
 
 public:
@@ -100,10 +108,10 @@ public:
 	idx_t row_value_count = 0;
 	//! amount of children in the row
 	idx_t row_children_count = 0;
-	//! amount of keys in the row (unique)
-	idx_t row_keys_count = 0;
 	//! stream used to write the binary data
 	MemoryStream stream;
+	//! For the current row, the (duplicate eliminated) key ids
+	string_map_t<idx_t> key_ids;
 };
 
 } // namespace
@@ -191,12 +199,11 @@ static bool ConvertJSONObject(yyjson_val *obj, Vector &result, VariantConversion
 			return false;
 		}
 
-		auto keys_index = state.row_keys_count;
 		auto str = string_t(key_string, key_string_len);
-		(void)state.AddString(keys_entry, str);
+		auto key_id = state.AddString(keys_entry, str);
 
 		//! Set the key_id
-		key_ids_data[start_child_index] = keys_index;
+		key_ids_data[start_child_index] = key_id;
 		//! Set the value_id
 		value_ids_data[start_child_index] = child_index;
 		start_child_index++;
@@ -326,7 +333,7 @@ bool VariantFunctions::CastJSONToVARIANT(Vector &source, Vector &result, idx_t c
 		}
 
 		//! keys
-		keys_list_entry.length = state.row_keys_count;
+		keys_list_entry.length = state.key_ids.size();
 		ListVector::SetListSize(keys, keys_list_entry.offset + keys_list_entry.length);
 
 		//! children
@@ -352,6 +359,7 @@ bool VariantFunctions::CastJSONToVARIANT(Vector &source, Vector &result, idx_t c
 
 	VariantVector::SortVariantKeys(dictionary, dictionary_size, sel, sel_size);
 	dictionary.Slice(state.sel_vec, state.keys_count);
+	dictionary.Flatten(state.keys_count);
 
 	if (source.GetVectorType() == VectorType::CONSTANT_VECTOR) {
 		result.SetVectorType(VectorType::CONSTANT_VECTOR);
