@@ -291,6 +291,10 @@ static bool FindValuesWithKey(FromVariantConversionData &conversion_data, idx_t 
 	return true;
 }
 
+//! * @param conversion_data The constant data relevant at all rows of the conversion
+//! * @param result The typed Vector to populate in this call
+//! * @param value_indices The array of `count` size, containing the indices into `values` to convert
+//! * @param row The row of the Variant to pull data from, if 'IsValid()' is true
 static bool CastVariant(FromVariantConversionData &conversion_data, Vector &result, uint32_t *value_indices,
                         idx_t count, optional_idx row) {
 	auto &target_type = result.GetType();
@@ -319,6 +323,8 @@ static bool CastVariant(FromVariantConversionData &conversion_data, Vector &resu
 				auto &child_name = child_types[child_idx].first;
 				auto dictionary_index = conversion_data.mapping.at(child_name);
 
+				//! FIXME: there is nothing preventing an OBJECT containing the same key twice I believe ?
+				//! Then find the relevant child of the OBJECTs we're converting
 				if (!FindValuesWithKey(conversion_data, dictionary_index, row, new_value_indices, child_data, count)) {
 					error = StringUtil::Format("VARIANT(OBJECT) is missing key '%s'");
 					return false;
@@ -385,6 +391,57 @@ static bool CastVariant(FromVariantConversionData &conversion_data, Vector &resu
 		case LogicalTypeId::DOUBLE:
 			return CastVariantToPrimitive<VariantNumericConversion<double, VariantLogicalType::DOUBLE>>(
 			    conversion_data, result, value_indices, count);
+		case LogicalTypeId::DATE:
+			return CastVariantToPrimitive<VariantNumericConversion<date_t, VariantLogicalType::DATE>>(
+			    conversion_data, result, value_indices, count);
+		case LogicalTypeId::TIMESTAMP:
+			return CastVariantToPrimitive<VariantNumericConversion<timestamp_t, VariantLogicalType::TIMESTAMP_MICROS>>(
+			    conversion_data, result, value_indices, count);
+		case LogicalTypeId::BLOB:
+			return CastVariantToPrimitive<VariantNumericConversion<string_t, VariantLogicalType::BLOB>>(
+			    conversion_data, result, value_indices, count);
+		case LogicalTypeId::INTERVAL:
+			return CastVariantToPrimitive<VariantNumericConversion<interval_t, VariantLogicalType::INTERVAL>>(
+			    conversion_data, result, value_indices, count);
+		case LogicalTypeId::DECIMAL: {
+			auto physical_type = target_type.InternalType();
+			uint8_t width;
+			uint8_t scale;
+			target_type.GetDecimalProperties(width, scale);
+
+			switch (physical_type) {
+			case PhysicalType::INT16:
+				return CastVariantToPrimitive<VariantNumericConversion<int16_t, VariantLogicalType::DECIMAL>>(
+				    conversion_data, result, value_indices, count);
+			case PhysicalType::INT32:
+				return CastVariantToPrimitive<VariantNumericConversion<int32_t, VariantLogicalType::DECIMAL>>(
+				    conversion_data, result, value_indices, count);
+			case PhysicalType::INT64:
+				return CastVariantToPrimitive<VariantNumericConversion<int64_t, VariantLogicalType::DECIMAL>>(
+				    conversion_data, result, value_indices, count);
+			case PhysicalType::INT128:
+				return CastVariantToPrimitive<VariantNumericConversion<hugeint_t, VariantLogicalType::DECIMAL>>(
+				    conversion_data, result, value_indices, count);
+			default:
+				throw NotImplementedException("Can't convert VARIANT to DECIMAL value of physical type: %s",
+				                              EnumUtil::ToString(physical_type));
+			};
+		}
+		case LogicalTypeId::TIME:
+			return CastVariantToPrimitive<VariantNumericConversion<dtime_t, VariantLogicalType::TIME_MICROS>>(
+			    conversion_data, result, value_indices, count);
+		case LogicalTypeId::TIME_TZ:
+			return CastVariantToPrimitive<VariantNumericConversion<dtime_tz_t, VariantLogicalType::TIME_MICROS_TZ>>(
+			    conversion_data, result, value_indices, count);
+		case LogicalTypeId::TIMESTAMP_TZ:
+			return CastVariantToPrimitive<
+			    VariantNumericConversion<timestamp_tz_t, VariantLogicalType::TIMESTAMP_MICROS_TZ>>(
+			    conversion_data, result, value_indices, count);
+		case LogicalTypeId::UUID:
+			return CastVariantToPrimitive<VariantNumericConversion<hugeint_t, VariantLogicalType::UUID>>(
+			    conversion_data, result, value_indices, count);
+		case LogicalTypeId::BIT:
+		case LogicalTypeId::VARINT:
 		default:
 			error = "Can't convert VARIANT";
 			return false;

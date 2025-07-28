@@ -46,3 +46,14 @@ statement error
 select {'b': 42, 'a': 'lalala', 'c': {'a': 'test'}}::VARIANT::STRUCT(a BOOLEAN);
 ----
 Invalid Input Error: Failed to cast value: Could not convert string 'lalala' to BOOL
+
+# VARIANT(OBJECT('a': VARCHAR)) -> STRUCT(a BOOLEAN)
+statement error
+select {'b': 42, 'a': 'lalala', 'c': {'a': 'test'}}::VARIANT::STRUCT(a BOOLEAN);
+----
+Invalid Input Error: Failed to cast value: Could not convert string 'lalala' to BOOL
+
+# VARIANT(TIMESTAMP_MICROS) -> TIMESTAMP
+query I
+select '2019/03/21'::TIMESTAMP::VARIANT::TIMESTAMP;
+----
