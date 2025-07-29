@@ -39,6 +39,8 @@ enum class VariantLogicalType : uint8_t {
 	ARRAY = 30
 };
 
+string VariantLogicalTypeToString(VariantLogicalType type);
+
 LogicalType CreateVariantType();
 
 template <class T>
