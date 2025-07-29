@@ -113,8 +113,6 @@ public:
 	list_entry_t *keys_data;
 };
 
-} // namespace
-
 struct EmptyConversionPayload {};
 
 //! enum
@@ -138,6 +136,8 @@ public:
 	idx_t width;
 	idx_t scale;
 };
+
+} // namespace
 
 //! -------- Determine the 'type_id' for the Value --------
 
