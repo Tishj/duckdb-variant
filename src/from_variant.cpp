@@ -394,8 +394,9 @@ static bool ConvertVariantToStruct(FromVariantConversionData &conversion_data, V
 		//! FIXME: there is nothing preventing an OBJECT from containing the same key twice I believe ?
 		PathComponent component;
 		component.payload.key = string_t(child_name.c_str(), child_name.size());
-		if (!VariantUtils::FindChildValues<VariantChildLookupMode::BY_KEY>(conversion_data.unified_format, component,
-		                                                                   row, new_value_indices, child_data, count)) {
+		component.lookup_mode = VariantChildLookupMode::BY_KEY;
+		if (!VariantUtils::FindChildValues(conversion_data.unified_format, component, row, new_value_indices,
+		                                   child_data, count)) {
 			conversion_data.error = StringUtil::Format("VARIANT(OBJECT) is missing key '%s'");
 			return false;
 		}

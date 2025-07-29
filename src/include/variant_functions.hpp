@@ -49,15 +49,10 @@ struct VariantNestedData {
 	uint32_t children_idx;
 };
 
-struct PathComponent;
-
-using variant_child_lookup_func_t =
-    std::function<void(RecursiveUnifiedVectorFormat &source, const PathComponent &component, optional_idx row,
-                       uint32_t *res, VariantNestedData *nested_data, idx_t count)>;
+enum class VariantChildLookupMode : uint8_t { BY_KEY, BY_INDEX };
 
 struct PathComponent {
-	//! Method used to find the requested child
-	variant_child_lookup_func_t func;
+	VariantChildLookupMode lookup_mode;
 	union {
 		string_t key;
 		uint32_t index;

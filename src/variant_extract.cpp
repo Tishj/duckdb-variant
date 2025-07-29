@@ -47,7 +47,7 @@ vector<PathComponent> ParsePath(const string &path) {
 			}
 			auto key = string_t(path.c_str() + start, i - start);
 			PathComponent comp;
-			comp.func = VariantUtils::FindChildValues<VariantChildLookupMode::BY_KEY>;
+			comp.lookup_mode = VariantChildLookupMode::BY_KEY;
 			comp.payload.key = std::move(key);
 			components.push_back(std::move(comp));
 			state = PathParsingState::BASE;
@@ -65,7 +65,7 @@ vector<PathComponent> ParsePath(const string &path) {
 			uint32_t index = std::stoul(path.substr(start, i - start));
 			i++; // skip ']'
 			PathComponent comp;
-			comp.func = VariantUtils::FindChildValues<VariantChildLookupMode::BY_INDEX>;
+			comp.lookup_mode = VariantChildLookupMode::BY_INDEX;
 			comp.payload.index = index;
 			components.push_back(std::move(comp));
 			state = PathParsingState::BASE;
