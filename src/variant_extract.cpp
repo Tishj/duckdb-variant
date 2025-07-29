@@ -2,6 +2,7 @@
 #include "variant_functions.hpp"
 #include "variant_utils.hpp"
 #include "duckdb/function/scalar/regexp.hpp"
+#include "duckdb/planner/expression/bound_function_expression.hpp"
 
 namespace duckdb {
 
@@ -76,7 +77,8 @@ vector<PathComponent> ParsePath(const string &path) {
 	return components;
 }
 
-VariantExtract::BindData::BindData(const string &constant_path) : FunctionData(), constant_path(constant_path) {
+VariantExtract::BindData::BindData(const string &constant_path_p) : FunctionData(), constant_path(constant_path_p) {
+	components = ParsePath(constant_path);
 }
 
 unique_ptr<FunctionData> VariantExtract::BindData::Copy() const {
@@ -118,14 +120,74 @@ void VariantExtract::Func(DataChunk &input, ExpressionState &state, Vector &resu
 	//! FIXME: do we want to assert that this is a constant, or allow different paths per row?
 	D_ASSERT(path.GetVectorType() == VectorType::CONSTANT_VECTOR);
 
+	auto &func_expr = state.expr.Cast<BoundFunctionExpression>();
+	auto &info = func_expr.bind_info->Cast<VariantExtract::BindData>();
+	auto &allocator = Allocator::DefaultAllocator();
+
 	RecursiveUnifiedVectorFormat source_format;
 	Vector::RecursiveToUnifiedFormat(variant, count, source_format);
 
 	//! Path either contains array indices or object keys
 	auto &validity = FlatVector::Validity(result);
-	for (idx_t i = 0; i < count; i++) {
-		validity.SetInvalid(i);
+
+	auto owned_value_indices = allocator.Allocate(sizeof(uint32_t) * count * 2);
+	auto value_indices = reinterpret_cast<uint32_t *>(owned_value_indices.get());
+	auto new_value_indices = &value_indices[count];
+	::bzero(value_indices, sizeof(uint32_t) * count * 2);
+
+	auto owned_nested_data = allocator.Allocate(sizeof(VariantNestedData) * count);
+	auto nested_data = reinterpret_cast<VariantNestedData *>(owned_nested_data.get());
+
+	string error;
+	for (idx_t i = 0; i < info.components.size(); i++) {
+		auto &component = info.components[i];
+		auto input_indices = i % 2 == 0 ? value_indices : new_value_indices;
+		auto output_indices = i % 2 == 0 ? new_value_indices : value_indices;
+
+		auto expected_type = component.lookup_mode == VariantChildLookupMode::BY_INDEX ? VariantLogicalType::ARRAY
+		                                                                               : VariantLogicalType::OBJECT;
+		if (!VariantUtils::CollectNestedData(source_format, expected_type, input_indices, count, optional_idx(),
+		                                     nested_data, error)) {
+			throw InvalidInputException(error);
+		}
+
+		if (!VariantUtils::FindChildValues(source_format, component, optional_idx(), output_indices, nested_data,
+		                                   count)) {
+			switch (component.lookup_mode) {
+			case VariantChildLookupMode::BY_INDEX: {
+				throw InvalidInputException("ARRAY does not contain the index: %d", component.payload.index);
+			}
+			case VariantChildLookupMode::BY_KEY: {
+				throw InvalidInputException("OBJECT does not contain the key: %s", component.payload.key.GetString());
+			}
+			}
+		}
 	}
+
+	//! We have these indices left, the simplest way we can finalize this is:
+	//! Leave the 'keys' alone, we'll just potentially have unused keys
+	//! Leave the 'children' alone, we'll have less children, but the child indices are still correct
+	//! We can also leave 'data' alone
+	//! We just need to remap index 0 of the 'values' list (for all rows)
+
+	auto result_indices = info.components.size() % 2 == 0 ? value_indices : new_value_indices;
+	result.Reference(variant);
+
+	auto &raw_values = VariantVector::GetValues(variant);
+	auto values_list_size = ListVector::GetListSize(raw_values);
+
+	auto &values = UnifiedVariantVector::GetValues(source_format);
+	auto values_data = values.GetData<list_entry_t>(values);
+	SelectionVector new_sel(0, values_list_size);
+	for (idx_t i = 0; i < count; i++) {
+		auto &list_entry = values_data[values.sel->get_index(i)];
+		new_sel.set_index(list_entry.offset, result_indices[i]);
+	}
+
+	auto &raw_type_id = VariantVector::GetValuesTypeId(variant);
+	auto &raw_byte_offset = VariantVector::GetValuesByteOffset(variant);
+	raw_type_id.Slice(new_sel, values_list_size);
+	raw_byte_offset.Slice(new_sel, values_list_size);
 
 	if (input.AllConstant()) {
 		result.SetVectorType(VectorType::CONSTANT_VECTOR);

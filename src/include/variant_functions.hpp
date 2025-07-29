@@ -23,6 +23,16 @@ public:
 	static bool CastVARIANTToVARCHAR(Vector &source, Vector &result, idx_t count, CastParameters &parameters);
 };
 
+enum class VariantChildLookupMode : uint8_t { BY_KEY, BY_INDEX };
+
+struct PathComponent {
+	VariantChildLookupMode lookup_mode;
+	union {
+		string_t key;
+		uint32_t index;
+	} payload;
+};
+
 //! Extract a Variant from a Variant
 struct VariantExtract {
 	struct BindData : public FunctionData {
@@ -35,6 +45,7 @@ struct VariantExtract {
 
 	public:
 		string constant_path;
+		vector<PathComponent> components;
 	};
 
 	static void Func(DataChunk &input, ExpressionState &state, Vector &output);
@@ -47,16 +58,6 @@ struct VariantNestedData {
 	uint32_t child_count;
 	//! Index of the first child
 	uint32_t children_idx;
-};
-
-enum class VariantChildLookupMode : uint8_t { BY_KEY, BY_INDEX };
-
-struct PathComponent {
-	VariantChildLookupMode lookup_mode;
-	union {
-		string_t key;
-		uint32_t index;
-	} payload;
 };
 
 } // namespace duckdb

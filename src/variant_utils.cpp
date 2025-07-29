@@ -64,4 +64,51 @@ bool VariantUtils::FindChildValues(RecursiveUnifiedVectorFormat &source, const P
 	return true;
 }
 
+bool VariantUtils::CollectNestedData(RecursiveUnifiedVectorFormat &variant, VariantLogicalType expected_type,
+                                     uint32_t *value_indices, idx_t count, optional_idx row,
+                                     VariantNestedData *child_data, string &error) {
+	auto &values_format = UnifiedVariantVector::GetValues(variant);
+	auto values_data = values_format.GetData<list_entry_t>(values_format);
+
+	auto &type_id_format = UnifiedVariantVector::GetValuesTypeId(variant);
+	auto type_id_data = type_id_format.GetData<uint8_t>(type_id_format);
+
+	auto &byte_offset_format = UnifiedVariantVector::GetValuesByteOffset(variant);
+	auto byte_offset_data = byte_offset_format.GetData<uint32_t>(byte_offset_format);
+
+	auto &value_format = UnifiedVariantVector::GetValue(variant);
+	auto value_data = value_format.GetData<string_t>(value_format);
+
+	for (idx_t i = 0; i < count; i++) {
+		auto row_index = row.IsValid() ? row.GetIndex() : i;
+
+		//! values
+		auto values_index = values_format.sel->get_index(row_index);
+		D_ASSERT(values_format.validity.RowIsValid(values_index));
+		auto values_list_entry = values_data[values_index];
+
+		//! Get the index into 'values'
+		uint32_t value_index = value_indices[i];
+
+		//! type_id + byte_offset
+		auto type_id = static_cast<VariantLogicalType>(
+		    type_id_data[type_id_format.sel->get_index(values_list_entry.offset + value_index)]);
+		auto byte_offset = byte_offset_data[byte_offset_format.sel->get_index(values_list_entry.offset + value_index)];
+
+		if (type_id != expected_type) {
+			error = StringUtil::Format("'%s' was expected, found '%s', can't convert VARIANT",
+			                           VariantLogicalTypeToString(expected_type), VariantLogicalTypeToString(type_id));
+			return false;
+		}
+
+		auto blob_index = value_format.sel->get_index(row_index);
+		auto blob_data = const_data_ptr_cast(value_data[blob_index].GetData());
+
+		auto ptr = blob_data + byte_offset;
+		child_data[i].child_count = VarintDecode<uint32_t>(ptr);
+		child_data[i].children_idx = VarintDecode<uint32_t>(ptr);
+	}
+	return true;
+}
+
 } // namespace duckdb
