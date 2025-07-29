@@ -181,7 +181,7 @@ void VariantExtract::Func(DataChunk &input, ExpressionState &state, Vector &resu
 	SelectionVector new_sel(0, values_list_size);
 	for (idx_t i = 0; i < count; i++) {
 		auto &list_entry = values_data[values.sel->get_index(i)];
-		new_sel.set_index(list_entry.offset, result_indices[i]);
+		new_sel.set_index(list_entry.offset, list_entry.offset + result_indices[i]);
 	}
 
 	auto &raw_type_id = VariantVector::GetValuesTypeId(variant);
