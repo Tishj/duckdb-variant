@@ -15,8 +15,6 @@ struct VariantNestedData {
 };
 
 struct FromVariantConversionData {
-	//! Mapping of struct keys -> dictionary index of the Variant 'keys'
-	unordered_map<string, idx_t> mapping;
 	//! The input Variant column
 	RecursiveUnifiedVectorFormat unified_format;
 	//! If unsuccessful - the error of the conversion
@@ -630,101 +628,17 @@ static bool CastVariant(FromVariantConversionData &conversion_data, Vector &resu
 	return true;
 }
 
-static bool AddToMapping(Vector &dictionary, idx_t dictionary_size, const string &key,
-                         unordered_map<string, idx_t> &mapping) {
-	if (mapping.count(key)) {
-		return true;
-	}
-
-	auto dictionary_data = FlatVector::GetData<string_t>(dictionary);
-	string_t child_name_str(key.c_str(), key.size());
-
-	// Binary search in sorted dictionary
-	idx_t left = 0, right = dictionary_size;
-	while (left < right) {
-		idx_t mid = left + (right - left) / 2;
-		if (dictionary_data[mid] == child_name_str) {
-			mapping.emplace(key, mid);
-			return true;
-		} else if (dictionary_data[mid] < child_name_str) {
-			left = mid + 1;
-		} else {
-			right = mid;
-		}
-	}
-
-	// Key not found
-	return false;
-}
-
-bool PopulateDictionaryMapping(Vector &source, FromVariantConversionData &conversion_data,
-                               const LogicalType &target_type, idx_t count) {
-	auto &keys_list = VariantVector::GetKeys(source);
-	auto &keys_entry = ListVector::GetEntry(keys_list);
-
-	reference<Vector> dictionary(keys_entry);
-	idx_t dictionary_size = ListVector::GetListSize(keys_list);
-	if (keys_entry.GetVectorType() == VectorType::DICTIONARY_VECTOR) {
-		dictionary = DictionaryVector::Child(keys_entry);
-		auto opt_dictionary_size = DictionaryVector::DictionarySize(keys_entry);
-		if (!opt_dictionary_size.IsValid()) {
-			return true;
-		}
-		dictionary_size = opt_dictionary_size.GetIndex();
-	}
-
-	auto &error = conversion_data.error;
-	bool success = true;
-	//! struct key -> mapping
-	//! With this mapping we can look up the mapping for the struct key (which is guaranteed to be present)
-	//! Then use `key_entry_format.sel->get_index(key_id)` to get the dictionary index for a given child.
-	//! Which we can then compare to the dictionary index we looked up from 'mapping'
-	auto &mapping = conversion_data.mapping;
-	TypeVisitor::Contains(
-	    target_type, [&mapping, &dictionary, dictionary_size, &success, &error](const LogicalType &type) {
-		    if (type.InternalType() == PhysicalType::STRUCT) {
-			    auto &children = StructType::GetChildTypes(type);
-			    for (auto &child : children) {
-				    if (!AddToMapping(dictionary, dictionary_size, child.first, mapping)) {
-					    error = StringUtil::Format("Struct key '%s' is missing from VARIANT", child.first);
-					    success = false;
-					    return false;
-				    }
-			    }
-		    } else if (type.id() == LogicalTypeId::MAP) {
-			    if (!AddToMapping(dictionary, dictionary_size, "key", mapping)) {
-				    error = StringUtil::Format("Struct key '%s' is missing from VARIANT", "key");
-				    success = false;
-				    return false;
-			    }
-			    if (!AddToMapping(dictionary, dictionary_size, "value", mapping)) {
-				    error = StringUtil::Format("Struct key '%s' is missing from VARIANT", "value");
-				    success = false;
-				    return false;
-			    }
-		    }
-		    return false;
-	    });
-	return success;
-}
-
 bool VariantFunctions::CastFromVARIANT(Vector &source, Vector &result, idx_t count, CastParameters &parameters) {
 	D_ASSERT(source.GetType() == CreateVariantType());
 	FromVariantConversionData conversion_data;
 	Vector::RecursiveToUnifiedFormat(source, count, conversion_data.unified_format);
 	auto &allocator = Allocator::DefaultAllocator();
-	auto &target_type = result.GetType();
-
-	auto success = PopulateDictionaryMapping(source, conversion_data, target_type, count);
-	if (!success) {
-		return FinalizeErrorMessage(conversion_data, result, parameters);
-	}
 
 	auto owned_value_indices = allocator.Allocate(sizeof(uint32_t) * count);
 	auto value_indices = reinterpret_cast<uint32_t *>(owned_value_indices.get());
 	::bzero(value_indices, sizeof(uint32_t) * count);
 
-	success = CastVariant(conversion_data, result, value_indices, 0, count, optional_idx());
+	auto success = CastVariant(conversion_data, result, value_indices, 0, count, optional_idx());
 	if (source.GetVectorType() == VectorType::CONSTANT_VECTOR) {
 		result.SetVectorType(VectorType::CONSTANT_VECTOR);
 	}
