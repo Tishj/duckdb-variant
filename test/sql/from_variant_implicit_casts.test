@@ -142,3 +142,40 @@ select a::VARIANT::STRUCT(a INTEGER[]) from struct_cast_tbl2;
 {'a': [8, 7, 6]}
 {'a': []}
 {'a': [10, 6, 4, 8, 9, 10, 12]}
+
+statement ok
+create table struct_cast_tbl3(a STRUCT(a STRUCT(b VARCHAR, c BOOL, a DATE)[]));
+
+statement ok
+insert into struct_cast_tbl3 select {'a': [
+	{
+		'b': 'hello',
+		'c': NULL,
+		'a': '1970/03/15'::DATE
+	},
+	{
+		'b': NULL,
+		'c': True,
+		'a': '2020/11/03'::DATE
+	}
+]};
+
+statement ok
+insert into struct_cast_tbl3 select {'a': [
+]};
+
+statement ok
+insert into struct_cast_tbl3 select {'a': [
+	{
+		'b': 'this is a long string',
+		'c': False,
+		'a': '1953/9/16'::DATE
+	}
+]};
+
+query I
+select a::VARIANT::STRUCT(a STRUCT(a VARCHAR, b VARCHAR)[]) from struct_cast_tbl3;
+----
+{'a': [{'a': 1970-03-15, 'b': hello}, {'a': 2020-11-03, 'b': 'NULL'}]}
+{'a': []}
+{'a': [{'a': 1953-09-16, 'b': this is a long string}]}
