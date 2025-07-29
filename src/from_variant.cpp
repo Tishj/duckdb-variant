@@ -1,18 +1,12 @@
 #include "variant_extension.hpp"
 #include "variant_functions.hpp"
+#include "variant_utils.hpp"
 #include "duckdb/common/exception/conversion_exception.hpp"
 #include "duckdb/common/type_visitor.hpp"
 
 namespace duckdb {
 
 namespace {
-
-struct VariantNestedData {
-	//! The amount of children in the nested structure
-	uint32_t child_count;
-	//! Index of the first child
-	uint32_t children_idx;
-};
 
 struct FromVariantConversionData {
 	//! The input Variant column
@@ -291,60 +285,6 @@ static bool CollectNestedData(FromVariantConversionData &conversion_data, uint32
 	return true;
 }
 
-static bool FindValuesWithKey(FromVariantConversionData &conversion_data, const string &key, optional_idx row,
-                              uint32_t *res, VariantNestedData *nested_data, idx_t count) {
-	auto &source = conversion_data.unified_format;
-
-	//! children
-	auto &children = UnifiedVariantVector::GetChildren(source);
-	auto children_data = children.GetData<list_entry_t>(children);
-
-	//! value_ids
-	auto &value_ids = UnifiedVariantVector::GetChildrenValueId(source);
-	auto value_ids_data = value_ids.GetData<uint32_t>(value_ids);
-
-	//! key_ids
-	auto &key_ids = UnifiedVariantVector::GetChildrenKeyId(source);
-	auto key_ids_data = key_ids.GetData<uint32_t>(key_ids);
-
-	//! keys
-	auto &keys = UnifiedVariantVector::GetKeys(source);
-	auto keys_data = keys.GetData<list_entry_t>(keys);
-
-	//! entry of the keys list
-	auto &keys_entry = UnifiedVariantVector::GetKeysEntry(source);
-	auto keys_entry_data = keys_entry.GetData<string_t>(keys_entry);
-	string_t dictionary_key(key.c_str(), key.size());
-
-	for (idx_t i = 0; i < count; i++) {
-		auto row_index = row.IsValid() ? row.GetIndex() : i;
-
-		auto &keys_list_entry = keys_data[keys.sel->get_index(row_index)];
-		auto &children_list_entry = children_data[children.sel->get_index(row_index)];
-
-		auto &nested_data_entry = nested_data[i];
-		bool found_key = false;
-		for (idx_t child_idx = 0; child_idx < nested_data_entry.child_count; child_idx++) {
-			auto children_index = children_list_entry.offset + nested_data_entry.children_idx + child_idx;
-			auto key_id = key_ids_data[key_ids.sel->get_index(children_index)];
-			auto value_id = value_ids_data[value_ids.sel->get_index(children_index)];
-			auto key_index = keys_entry.sel->get_index(keys_list_entry.offset + key_id);
-			auto &child_key = keys_entry_data[key_index];
-
-			if (child_key == dictionary_key) {
-				//! Found the key we're looking for
-				res[i] = value_id;
-				found_key = true;
-				break;
-			}
-		}
-		if (!found_key) {
-			return false;
-		}
-	}
-	return true;
-}
-
 static bool FindValues(FromVariantConversionData &conversion_data, idx_t row_index, uint32_t *res,
                        VariantNestedData &nested_data_entry) {
 	auto &source = conversion_data.unified_format;
@@ -452,7 +392,10 @@ static bool ConvertVariantToStruct(FromVariantConversionData &conversion_data, V
 
 		//! Then find the relevant child of the OBJECTs we're converting
 		//! FIXME: there is nothing preventing an OBJECT from containing the same key twice I believe ?
-		if (!FindValuesWithKey(conversion_data, child_name, row, new_value_indices, child_data, count)) {
+		PathComponent component;
+		component.payload.key = string_t(child_name.c_str(), child_name.size());
+		if (!VariantUtils::FindChildValues<VariantChildLookupMode::BY_KEY>(conversion_data.unified_format, component,
+		                                                                   row, new_value_indices, child_data, count)) {
 			conversion_data.error = StringUtil::Format("VARIANT(OBJECT) is missing key '%s'");
 			return false;
 		}

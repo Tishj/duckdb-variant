@@ -23,4 +23,45 @@ public:
 	static bool CastVARIANTToVARCHAR(Vector &source, Vector &result, idx_t count, CastParameters &parameters);
 };
 
+//! Extract a Variant from a Variant
+struct VariantExtract {
+	struct BindData : public FunctionData {
+	public:
+		explicit BindData(const string &constant_path);
+
+	public:
+		unique_ptr<FunctionData> Copy() const override;
+		bool Equals(const FunctionData &other) const override;
+
+	public:
+		string constant_path;
+	};
+
+	static void Func(DataChunk &input, ExpressionState &state, Vector &output);
+	static unique_ptr<FunctionData> Bind(ClientContext &context, ScalarFunction &bound_function,
+	                                     vector<unique_ptr<Expression>> &arguments);
+};
+
+struct VariantNestedData {
+	//! The amount of children in the nested structure
+	uint32_t child_count;
+	//! Index of the first child
+	uint32_t children_idx;
+};
+
+struct PathComponent;
+
+using variant_child_lookup_func_t =
+    std::function<void(RecursiveUnifiedVectorFormat &source, const PathComponent &component, optional_idx row,
+                       uint32_t *res, VariantNestedData *nested_data, idx_t count)>;
+
+struct PathComponent {
+	//! Method used to find the requested child
+	variant_child_lookup_func_t func;
+	union {
+		string_t key;
+		uint32_t index;
+	} payload;
+};
+
 } // namespace duckdb
