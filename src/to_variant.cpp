@@ -850,9 +850,12 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 				                              EnumUtil::ToString(physical_type));
 			}
 		}
-		//! TODO: we need to cast this to a string representation and then store it as VARCHAR
 		case LogicalTypeId::VARINT:
+			return ConvertPrimitiveToVariant<WRITE_DATA, IGNORE_NULLS, VariantLogicalType::VARINT, string_t>(
+			    source, result, offsets, count, selvec, value_ids_selvec, empty_payload);
 		case LogicalTypeId::BIT:
+			return ConvertPrimitiveToVariant<WRITE_DATA, IGNORE_NULLS, VariantLogicalType::BITSTRING, string_t>(
+			    source, result, offsets, count, selvec, value_ids_selvec, empty_payload);
 		default:
 			throw NotImplementedException("Invalid LogicalType (%s) for ConvertToVariant",
 			                              EnumUtil::ToString(logical_type));

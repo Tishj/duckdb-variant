@@ -592,6 +592,18 @@ yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat
 		}
 		return obj;
 	}
+	case VariantLogicalType::BITSTRING: {
+		auto string_length = VarintDecode<uint32_t>(ptr);
+		auto string_data = reinterpret_cast<const char *>(ptr);
+		auto val_str = Value::BIT(const_data_ptr_cast(string_data), string_length).ToString();
+		return yyjson_mut_strncpy(doc, val_str.c_str(), val_str.size());
+	}
+	case VariantLogicalType::VARINT: {
+		auto string_length = VarintDecode<uint32_t>(ptr);
+		auto string_data = reinterpret_cast<const char *>(ptr);
+		auto val_str = Value::VARINT(const_data_ptr_cast(string_data), string_length).ToString();
+		return yyjson_mut_rawncpy(doc, val_str.c_str(), val_str.size());
+	}
 	default:
 		throw InternalException("VariantLogicalType(%d) not handled", static_cast<uint8_t>(type_id));
 	}

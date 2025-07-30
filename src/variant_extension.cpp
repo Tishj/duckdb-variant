@@ -125,6 +125,11 @@ static void LoadInternal(ExtensionLoader &loader) {
 			casts.RegisterCastFunction(variant_type, source_type, VariantFunctions::CastFromVARIANT, 5);
 		}
 	}
+	vector<LogicalType> extra_types {LogicalTypeId::VARINT, LogicalTypeId::BIT};
+	for (const auto &type : extra_types) {
+		casts.RegisterCastFunction(type, variant_type, VariantFunctions::CastToVARIANT, 5);
+		casts.RegisterCastFunction(variant_type, type, VariantFunctions::CastFromVARIANT, 5);
+	}
 }
 
 void VariantExtension::Load(ExtensionLoader &db) {
