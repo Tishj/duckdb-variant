@@ -178,14 +178,13 @@ void VariantExtract::Func(DataChunk &input, ExpressionState &state, Vector &resu
 	auto values_list_size = ListVector::GetListSize(raw_values);
 
 	//! Create a new Variant that references the existing data of the input Variant
-	Vector result_variant(variant.GetType(), false);
-	result_variant.Initialize(false, count);
-	VariantVector::GetKeys(result_variant).Reference(VariantVector::GetKeys(variant));
-	VariantVector::GetChildren(result_variant).Reference(VariantVector::GetChildren(variant));
-	VariantVector::GetValue(result_variant).Reference(VariantVector::GetValue(variant));
+	result.Initialize(false, count);
+	VariantVector::GetKeys(result).Reference(VariantVector::GetKeys(variant));
+	VariantVector::GetChildren(result).Reference(VariantVector::GetChildren(variant));
+	VariantVector::GetValue(result).Reference(VariantVector::GetValue(variant));
 
 	//! Copy the existing 'values'
-	auto &result_values = VariantVector::GetValues(result_variant);
+	auto &result_values = VariantVector::GetValues(result);
 	result_values.Initialize(false, count);
 	ListVector::Reserve(result_values, values_list_size);
 	ListVector::SetListSize(result_values, values_list_size);
@@ -193,7 +192,6 @@ void VariantExtract::Func(DataChunk &input, ExpressionState &state, Vector &resu
 	for (idx_t i = 0; i < count; i++) {
 		result_values_data[i] = values_data[values.sel->get_index(i)];
 	}
-	result.Reference(result_variant);
 
 	//! Prepare the selection vector to remap index 0 of each row
 	SelectionVector new_sel(0, values_list_size);
