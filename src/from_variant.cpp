@@ -70,6 +70,10 @@ string VariantLogicalTypeToString(VariantLogicalType type) {
 		return "OBJECT";
 	case VariantLogicalType::ARRAY:
 		return "ARRAY";
+	case VariantLogicalType::VARINT:
+		return "VARINT";
+	case VariantLogicalType::BITSTRING:
+		return "BITSTRING";
 	default:
 		return "INVALID TYPE";
 	};
@@ -512,8 +516,16 @@ static bool CastVariant(FromVariantConversionData &conversion_data, Vector &resu
 		case LogicalTypeId::UUID:
 			return CastVariantToPrimitive<VariantDirectConversion<hugeint_t, VariantLogicalType::UUID>>(
 			    conversion_data, result, value_indices, offset, count, row, empty_payload);
-		case LogicalTypeId::BIT:
-		case LogicalTypeId::VARINT:
+		case LogicalTypeId::BIT: {
+			StringConversionPayload string_payload(result);
+			return CastVariantToPrimitive<VariantDirectConversion<string_t, VariantLogicalType::BITSTRING>>(
+			    conversion_data, result, value_indices, offset, count, row, string_payload);
+		}
+		case LogicalTypeId::VARINT: {
+			StringConversionPayload string_payload(result);
+			return CastVariantToPrimitive<VariantDirectConversion<string_t, VariantLogicalType::VARINT>>(
+			    conversion_data, result, value_indices, offset, count, row, string_payload);
+		}
 		default:
 			error = "Can't convert VARIANT";
 			return false;

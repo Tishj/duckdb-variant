@@ -167,6 +167,14 @@ Value VariantConversion::ConvertVariantToValue(RecursiveUnifiedVectorFormat &sou
 		}
 		return StringUtil::Format("{%s}", StringUtil::Join(children, ", "));
 	}
+	case VariantLogicalType::BITSTRING: {
+		auto string_length = VarintDecode<uint32_t>(ptr);
+		return Value::BIT(ptr, string_length);
+	}
+	case VariantLogicalType::VARINT: {
+		auto string_length = VarintDecode<uint32_t>(ptr);
+		return Value::VARINT(ptr, string_length);
+	}
 	default:
 		throw InternalException("VariantLogicalType(%d) not handled", static_cast<uint8_t>(type_id));
 	}

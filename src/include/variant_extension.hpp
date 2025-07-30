@@ -36,7 +36,9 @@ enum class VariantLogicalType : uint8_t {
 	TIMESTAMP_MICROS_TZ = 27,
 	INTERVAL = 28,
 	OBJECT = 29,
-	ARRAY = 30
+	ARRAY = 30,
+	VARINT = 31,
+	BITSTRING = 32
 };
 
 string VariantLogicalTypeToString(VariantLogicalType type);
