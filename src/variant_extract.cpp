@@ -171,23 +171,43 @@ void VariantExtract::Func(DataChunk &input, ExpressionState &state, Vector &resu
 	//! We just need to remap index 0 of the 'values' list (for all rows)
 
 	auto result_indices = info.components.size() % 2 == 0 ? value_indices : new_value_indices;
-	result.Reference(variant);
-
-	auto &raw_values = VariantVector::GetValues(variant);
-	auto values_list_size = ListVector::GetListSize(raw_values);
 
 	auto &values = UnifiedVariantVector::GetValues(source_format);
 	auto values_data = values.GetData<list_entry_t>(values);
+	auto &raw_values = VariantVector::GetValues(variant);
+	auto values_list_size = ListVector::GetListSize(raw_values);
+
+	//! Create a new Variant that references the existing data of the input Variant
+	Vector result_variant(variant.GetType(), false, false, count);
+	result_variant.SetAuxiliary(variant.GetAuxiliary());
+	VariantVector::GetKeys(result_variant).Reference(VariantVector::GetKeys(variant));
+	VariantVector::GetChildren(result_variant).Reference(VariantVector::GetChildren(variant));
+	VariantVector::GetValue(result_variant).Reference(VariantVector::GetValue(variant));
+
+	//! Copy the existing 'values'
+	auto &result_values = VariantVector::GetValues(result_variant);
+	result_values.Initialize(false, count);
+	ListVector::Reserve(result_values, values_list_size);
+	ListVector::SetListSize(result_values, values_list_size);
+	auto result_values_data = FlatVector::GetData<list_entry_t>(result_values);
+	for (idx_t i = 0; i < count; i++) {
+		result_values_data[i] = values_data[values.sel->get_index(i)];
+	}
+	ListVector::GetEntry(result_values).Reference(ListVector::GetEntry(VariantVector::GetValues(variant)));
+	result.Reference(result_variant);
+
+	//! Prepare the selection vector to remap index 0 of each row
 	SelectionVector new_sel(0, values_list_size);
 	for (idx_t i = 0; i < count; i++) {
 		auto &list_entry = values_data[values.sel->get_index(i)];
 		new_sel.set_index(list_entry.offset, list_entry.offset + result_indices[i]);
 	}
 
-	auto &raw_type_id = VariantVector::GetValuesTypeId(variant);
-	auto &raw_byte_offset = VariantVector::GetValuesByteOffset(variant);
-	raw_type_id.Slice(new_sel, values_list_size);
-	raw_byte_offset.Slice(new_sel, values_list_size);
+	auto &result_type_id = VariantVector::GetValuesTypeId(result);
+	auto &result_byte_offset = VariantVector::GetValuesByteOffset(result);
+	result_type_id.Dictionary(VariantVector::GetValuesTypeId(variant), values_list_size, new_sel, values_list_size);
+	result_byte_offset.Dictionary(VariantVector::GetValuesByteOffset(variant), values_list_size, new_sel,
+	                              values_list_size);
 
 	if (input.AllConstant()) {
 		result.SetVectorType(VectorType::CONSTANT_VECTOR);

@@ -45,6 +45,8 @@ struct VariantExtract {
 
 	public:
 		string constant_path;
+		//! NOTE: the keys in here reference data of the 'constant_path',
+		//! the components can not be copied without reconstruction
 		vector<PathComponent> components;
 	};
 
@@ -58,6 +60,11 @@ struct VariantNestedData {
 	uint32_t child_count;
 	//! Index of the first child
 	uint32_t children_idx;
+};
+
+struct VariantTypeof {
+public:
+	static void Func(DataChunk &input, ExpressionState &state, Vector &output);
 };
 
 } // namespace duckdb
