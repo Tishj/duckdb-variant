@@ -142,8 +142,6 @@ struct VariantVector {
 	static Vector &GetData(Vector &vec) {
 		return *StructVector::GetEntries(vec)[3];
 	}
-
-	static void SortVariantKeys(Vector &dictionary, idx_t dictionary_size, SelectionVector &sel, idx_t sel_size);
 };
 
 class VariantExtension : public Extension {

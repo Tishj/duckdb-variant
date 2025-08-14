@@ -2,6 +2,7 @@
 
 #include "variant_extension.hpp"
 #include "variant_functions.hpp"
+#include "variant_utils.hpp"
 #include "duckdb.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -12,7 +13,7 @@ namespace duckdb {
 
 static constexpr auto VARIANT_TYPE_NAME = "VARIANT";
 
-void VariantVector::SortVariantKeys(Vector &dictionary, idx_t dictionary_size, SelectionVector &sel, idx_t sel_size) {
+void VariantUtils::SortVariantKeys(Vector &dictionary, idx_t dictionary_size, SelectionVector &sel, idx_t sel_size) {
 	auto &allocator = Allocator::DefaultAllocator();
 	auto dictionary_data = FlatVector::GetData<string_t>(dictionary);
 

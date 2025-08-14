@@ -1,5 +1,6 @@
 #include "variant_extension.hpp"
 #include "variant_functions.hpp"
+#include "variant_utils.hpp"
 #include "yyjson.hpp"
 #include "duckdb/common/serializer/memory_stream.hpp"
 #include "duckdb/common/typedefs.hpp"
@@ -357,7 +358,7 @@ bool VariantFunctions::CastJSONToVARIANT(Vector &source, Vector &result, idx_t c
 	auto &sel = state.sel_vec;
 	auto sel_size = state.keys_count;
 
-	VariantVector::SortVariantKeys(dictionary, dictionary_size, sel, sel_size);
+	VariantUtils::SortVariantKeys(dictionary, dictionary_size, sel, sel_size);
 	dictionary.Slice(state.sel_vec, state.keys_count);
 	dictionary.Flatten(state.keys_count);
 

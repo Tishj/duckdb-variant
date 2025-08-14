@@ -1,5 +1,6 @@
 #include "variant_functions.hpp"
 #include "variant_extension.hpp"
+#include "variant_utils.hpp"
 #include "duckdb/common/type_visitor.hpp"
 #include "duckdb/common/string_map_set.hpp"
 #include "duckdb/common/printer.hpp"
@@ -981,7 +982,7 @@ bool VariantFunctions::CastToVARIANT(Vector &source, Vector &result, idx_t count
 		ConvertToVariant<true>(source, result_data, offsets, count, nullptr, keys_selvec, dictionary, nullptr);
 	}
 
-	VariantVector::SortVariantKeys(keys_entry, dictionary.Size(), keys_selvec, keys_selvec_size);
+	VariantUtils::SortVariantKeys(keys_entry, dictionary.Size(), keys_selvec, keys_selvec_size);
 
 	keys_entry.Slice(keys_selvec, keys_selvec_size);
 	keys_entry.Flatten(keys_selvec_size);
