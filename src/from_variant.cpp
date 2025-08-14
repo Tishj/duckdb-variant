@@ -70,7 +70,7 @@ string VariantLogicalTypeToString(VariantLogicalType type) {
 		return "OBJECT";
 	case VariantLogicalType::ARRAY:
 		return "ARRAY";
-	case VariantLogicalType::VARINT:
+	case VariantLogicalType::BIGNUM:
 		return "VARINT";
 	case VariantLogicalType::BITSTRING:
 		return "BITSTRING";
@@ -523,7 +523,7 @@ static bool CastVariant(FromVariantConversionData &conversion_data, Vector &resu
 		}
 		case LogicalTypeId::VARINT: {
 			StringConversionPayload string_payload(result);
-			return CastVariantToPrimitive<VariantDirectConversion<string_t, VariantLogicalType::VARINT>>(
+			return CastVariantToPrimitive<VariantDirectConversion<string_t, VariantLogicalType::BIGNUM>>(
 			    conversion_data, result, value_indices, offset, count, row, string_payload);
 		}
 		default:

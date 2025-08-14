@@ -850,7 +850,7 @@ static bool ConvertToVariant(Vector &source, VariantVectorData &result, DataChun
 			}
 		}
 		case LogicalTypeId::VARINT:
-			return ConvertPrimitiveToVariant<WRITE_DATA, IGNORE_NULLS, VariantLogicalType::VARINT, string_t>(
+			return ConvertPrimitiveToVariant<WRITE_DATA, IGNORE_NULLS, VariantLogicalType::BIGNUM, string_t>(
 			    source, result, offsets, count, selvec, value_ids_selvec, empty_payload);
 		case LogicalTypeId::BIT:
 			return ConvertPrimitiveToVariant<WRITE_DATA, IGNORE_NULLS, VariantLogicalType::BITSTRING, string_t>(
