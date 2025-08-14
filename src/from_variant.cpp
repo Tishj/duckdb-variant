@@ -230,7 +230,7 @@ static bool CastVariantToPrimitive(FromVariantConversionData &conversion_data, V
 		if (!OP::Convert(type_id, byte_offset, value_blob_data, result_data[i + offset], payload,
 		                 conversion_data.error)) {
 			auto value =
-			    VariantConversion::ConvertVariantToValue(conversion_data.unified_format, row_index, value_indices[i]);
+			    VariantUtils::ConvertVariantToValue(conversion_data.unified_format, row_index, value_indices[i]);
 			result.SetValue(i + offset, value.DefaultCastAs(target_type, true));
 		}
 	}
@@ -386,7 +386,7 @@ static bool CastVariant(FromVariantConversionData &conversion_data, Vector &resu
 				//! Get the index into 'values'
 				uint32_t value_index = value_indices[i];
 				auto value =
-				    VariantConversion::ConvertVariantToValue(conversion_data.unified_format, row_index, value_index);
+				    VariantUtils::ConvertVariantToValue(conversion_data.unified_format, row_index, value_index);
 				result.SetValue(i + offset, value.DefaultCastAs(target_type, true));
 			}
 			return true;
@@ -403,7 +403,7 @@ static bool CastVariant(FromVariantConversionData &conversion_data, Vector &resu
 				//! Get the index into 'values'
 				uint32_t value_index = value_indices[i];
 				auto value =
-				    VariantConversion::ConvertVariantToValue(conversion_data.unified_format, row_index, value_index);
+				    VariantUtils::ConvertVariantToValue(conversion_data.unified_format, row_index, value_index);
 				result.SetValue(i + offset, value.DefaultCastAs(target_type, true));
 			}
 			return true;
