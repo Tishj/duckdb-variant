@@ -7,7 +7,7 @@
 namespace duckdb {
 
 struct VariantUtils {
-	static bool FindChildValues(RecursiveUnifiedVectorFormat &source, const PathComponent &component, optional_idx row,
+	static bool FindChildValues(RecursiveUnifiedVectorFormat &source, const VariantPathComponent &component, optional_idx row,
 	                            uint32_t *res, VariantNestedData *nested_data, idx_t count);
 	static bool CollectNestedData(RecursiveUnifiedVectorFormat &variant, VariantLogicalType expected_type,
 	                              uint32_t *value_indices, idx_t count, optional_idx row, VariantNestedData *child_data,

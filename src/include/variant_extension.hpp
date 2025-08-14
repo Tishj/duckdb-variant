@@ -100,7 +100,7 @@ struct UnifiedVariantVector {
 		return values.children[0].children[1].unified;
 	}
 	//! The binary blob 'value' encoding the Variant for the row
-	static UnifiedVectorFormat &GetValue(RecursiveUnifiedVectorFormat &vec) {
+	static UnifiedVectorFormat &GetData(RecursiveUnifiedVectorFormat &vec) {
 		return vec.children[3].unified;
 	}
 };
@@ -139,7 +139,7 @@ struct VariantVector {
 		return *StructVector::GetEntries(values)[1];
 	}
 	//! The binary blob 'value' encoding the Variant for the row
-	static Vector &GetValue(Vector &vec) {
+	static Vector &GetData(Vector &vec) {
 		return *StructVector::GetEntries(vec)[3];
 	}
 

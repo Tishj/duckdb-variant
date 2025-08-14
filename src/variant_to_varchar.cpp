@@ -54,7 +54,7 @@ Value VariantConversion::ConvertVariantToValue(RecursiveUnifiedVectorFormat &sou
 	auto byte_offset = byte_offsets_data[byte_offsets.sel->get_index(values_idx)];
 
 	//! The blob data of the Variant, accessed by byte offset retrieved above ^
-	auto &value = UnifiedVariantVector::GetValue(source);
+	auto &value = UnifiedVariantVector::GetData(source);
 	auto value_data = value.GetData<string_t>(value);
 	auto &blob = value_data[row];
 	auto blob_data = const_data_ptr_cast(blob.GetData());

@@ -84,7 +84,7 @@ struct VariantVectorData {
 public:
 	explicit VariantVectorData(Vector &variant)
 	    : key_id_validity(FlatVector::Validity(VariantVector::GetChildrenKeyId(variant))) {
-		blob_data = FlatVector::GetData<string_t>(VariantVector::GetValue(variant));
+		blob_data = FlatVector::GetData<string_t>(VariantVector::GetData(variant));
 		type_ids_data = FlatVector::GetData<uint8_t>(VariantVector::GetValuesTypeId(variant));
 		byte_offset_data = FlatVector::GetData<uint32_t>(VariantVector::GetValuesByteOffset(variant));
 		key_id_data = FlatVector::GetData<uint32_t>(VariantVector::GetChildrenKeyId(variant));
@@ -884,7 +884,7 @@ static void InitializeVariants(DataChunk &offsets, Vector &result, SelectionVect
 	auto &values = VariantVector::GetValues(result);
 	auto values_data = ListVector::GetData(values);
 
-	auto &blob = VariantVector::GetValue(result);
+	auto &blob = VariantVector::GetData(result);
 	auto blob_data = FlatVector::GetData<string_t>(blob);
 
 	idx_t children_offset = 0;

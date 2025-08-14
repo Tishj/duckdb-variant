@@ -9,7 +9,7 @@ namespace duckdb {
 namespace {
 
 using child_lookup_func_t =
-    std::function<void(RecursiveUnifiedVectorFormat &source, const PathComponent &component, optional_idx row,
+    std::function<void(RecursiveUnifiedVectorFormat &source, const VariantPathComponent &component, optional_idx row,
                        uint32_t *res, VariantNestedData *nested_data, idx_t count)>;
 
 enum class PathParsingState : uint8_t { BASE, KEY, INDEX };
@@ -18,8 +18,8 @@ enum class PathParsingState : uint8_t { BASE, KEY, INDEX };
 
 using regexp_util::TryParseConstantPattern;
 
-vector<PathComponent> ParsePath(const string &path) {
-	vector<PathComponent> components;
+vector<VariantPathComponent> ParsePath(const string &path) {
+	vector<VariantPathComponent> components;
 	auto state = PathParsingState::BASE;
 
 	idx_t i = 0;
@@ -47,7 +47,7 @@ vector<PathComponent> ParsePath(const string &path) {
 				i++;
 			}
 			auto key = string_t(path.c_str() + start, i - start);
-			PathComponent comp;
+			VariantPathComponent comp;
 			comp.lookup_mode = VariantChildLookupMode::BY_KEY;
 			comp.payload.key = std::move(key);
 			components.push_back(std::move(comp));
@@ -65,7 +65,7 @@ vector<PathComponent> ParsePath(const string &path) {
 			}
 			uint32_t index = std::stoul(path.substr(start, i - start));
 			i++; // skip ']'
-			PathComponent comp;
+			VariantPathComponent comp;
 			comp.lookup_mode = VariantChildLookupMode::BY_INDEX;
 			comp.payload.index = index;
 			components.push_back(std::move(comp));
@@ -181,7 +181,7 @@ void VariantExtract::Func(DataChunk &input, ExpressionState &state, Vector &resu
 	result.Initialize(false, count);
 	VariantVector::GetKeys(result).Reference(VariantVector::GetKeys(variant));
 	VariantVector::GetChildren(result).Reference(VariantVector::GetChildren(variant));
-	VariantVector::GetValue(result).Reference(VariantVector::GetValue(variant));
+	VariantVector::GetData(result).Reference(VariantVector::GetData(variant));
 
 	//! Copy the existing 'values'
 	auto &result_values = VariantVector::GetValues(result);

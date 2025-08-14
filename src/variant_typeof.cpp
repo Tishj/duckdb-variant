@@ -42,7 +42,7 @@ void VariantTypeof::Func(DataChunk &input, ExpressionState &state, Vector &resul
 	auto keys_entry_data = keys_entry.GetData<string_t>(keys_entry);
 
 	//! value
-	auto &value = UnifiedVariantVector::GetValue(source_format);
+	auto &value = UnifiedVariantVector::GetData(source_format);
 	auto value_data = value.GetData<string_t>(value);
 
 	auto result_data = FlatVector::GetData<string_t>(result);

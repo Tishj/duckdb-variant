@@ -3,7 +3,7 @@
 
 namespace duckdb {
 
-bool VariantUtils::FindChildValues(RecursiveUnifiedVectorFormat &source, const PathComponent &component,
+bool VariantUtils::FindChildValues(RecursiveUnifiedVectorFormat &source, const VariantPathComponent &component,
                                    optional_idx row, uint32_t *res, VariantNestedData *nested_data, idx_t count) {
 	//! children
 	auto &children = UnifiedVariantVector::GetChildren(source);
@@ -76,7 +76,7 @@ bool VariantUtils::CollectNestedData(RecursiveUnifiedVectorFormat &variant, Vari
 	auto &byte_offset_format = UnifiedVariantVector::GetValuesByteOffset(variant);
 	auto byte_offset_data = byte_offset_format.GetData<uint32_t>(byte_offset_format);
 
-	auto &value_format = UnifiedVariantVector::GetValue(variant);
+	auto &value_format = UnifiedVariantVector::GetData(variant);
 	auto value_data = value_format.GetData<string_t>(value_format);
 
 	for (idx_t i = 0; i < count; i++) {

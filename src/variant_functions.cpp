@@ -304,7 +304,7 @@ bool VariantFunctions::CastJSONToVARIANT(Vector &source, Vector &result, idx_t c
 	auto values_data = FlatVector::GetData<list_entry_t>(values);
 	ListVector::SetListSize(values, 0);
 
-	auto &value = VariantVector::GetValue(result);
+	auto &value = VariantVector::GetData(result);
 	auto value_data = FlatVector::GetData<string_t>(value);
 
 	ListVector::Reserve(values, state.value_count + state.row_value_count + count);
@@ -412,7 +412,7 @@ yyjson_mut_val *ConvertVariant(yyjson_mut_doc *doc, RecursiveUnifiedVectorFormat
 	auto byte_offset = byte_offsets_data[byte_offsets.sel->get_index(values_idx)];
 
 	//! The blob data of the Variant, accessed by byte offset retrieved above ^
-	auto &value = UnifiedVariantVector::GetValue(source);
+	auto &value = UnifiedVariantVector::GetData(source);
 	auto value_data = value.GetData<string_t>(value);
 	auto &blob = value_data[row];
 	auto blob_data = const_data_ptr_cast(blob.GetData());

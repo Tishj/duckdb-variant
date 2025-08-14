@@ -25,7 +25,7 @@ public:
 
 enum class VariantChildLookupMode : uint8_t { BY_KEY, BY_INDEX };
 
-struct PathComponent {
+struct VariantPathComponent {
 	VariantChildLookupMode lookup_mode;
 	union {
 		string_t key;
@@ -47,7 +47,7 @@ struct VariantExtract {
 		string constant_path;
 		//! NOTE: the keys in here reference data of the 'constant_path',
 		//! the components can not be copied without reconstruction
-		vector<PathComponent> components;
+		vector<VariantPathComponent> components;
 	};
 
 	static void Func(DataChunk &input, ExpressionState &state, Vector &output);
